@@ -372,13 +372,13 @@ const CustomDrawerContent = ({ isOpen, closeDrawer }) => {
         <div className="drawer-divider"></div>
         <div className="drawer-section">
           <div className="drawer-section-title">Become a Seller</div>
-          <a className="drawer-item" href='https://seller.friendsonlineshop.com/' target="_blank" style={{textDecoration: 'none'}}>
+          <a className="drawer-item" href='https://seller.alphasoft.world/' target="_blank" style={{textDecoration: 'none'}}>
             <div className="drawer-item-icon">
               <FontAwesomeIcon icon={faArrowRightFromBracket} />
             </div>
             <span className="drawer-item-text">Login as Seller</span>
           </a>
-          <a className="drawer-item" href='https://seller.friendsonlineshop.com/register' target="_blank" style={{textDecoration: 'none'}}>
+          <a className="drawer-item" href='https://seller.alphasoft.world/register' target="_blank" style={{textDecoration: 'none'}}>
             <div className="drawer-item-icon">
               <FontAwesomeIcon icon={faCheckCircle} />
             </div>
@@ -674,7 +674,7 @@ const App = () => {
             <Routes>
               {/* Home route */}
               <Route path="/" element={
-                <MainLayout title="Friends Online Shop" activeTab="home">
+                <MainLayout title="Alpha Mart" activeTab="home">
                   <ProductsScreen />
                 </MainLayout>
               } />

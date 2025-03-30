@@ -158,7 +158,7 @@ const LoginScreen = () => {
             />
           ) : (
             <LogoPlaceholder>
-              <Typography variant="h4">Friends Online Shop</Typography>
+              <Typography variant="h4">AlphaMart</Typography>
             </LogoPlaceholder>
           )}
         </LogoContainer>
@@ -255,7 +255,7 @@ const LoginScreen = () => {
             
             <SellerOptionsWrapper>
               <SellerOptionLink 
-                href='https://seller.friendsonlineshop.com/' 
+                href='https://seller.alphasoft.world/' 
                 target="_blank" 
                 rel="noopener noreferrer"
               >
@@ -266,7 +266,7 @@ const LoginScreen = () => {
               </SellerOptionLink>
               
               <SellerOptionLink 
-                href='https://seller.friendsonlineshop.com/register' 
+                href='https://seller.alphasoft.world/register' 
                 target="_blank" 
                 rel="noopener noreferrer"
               >
