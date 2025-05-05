@@ -1,1153 +1,937 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { 
-  Box, 
-  Button, 
-  CircularProgress, 
-  Grid, 
-  IconButton, 
-  Typography, 
-  useMediaQuery, 
+import {
+  Box,
+  Button,
+  CircularProgress,
+  Container,
+  Typography,
+  useMediaQuery,
   useTheme,
-  Chip,
   Card,
   CardMedia,
   CardContent,
   CardActions,
-  Rating,
-  Skeleton,
-  Container,
+  Grid,
+  AppBar,
+  Toolbar,
+  IconButton,
+  Drawer,
+  List,
+  ListItem,
+  ListItemText,
+  Divider,
   Paper,
-  Fade,
-  Tooltip
+  Fade
 } from '@mui/material';
-import { 
-  Favorite as FavoriteIcon, 
-  FavoriteBorder as FavoriteBorderIcon, 
-  ShoppingCart as CartIcon,
-  LocalShipping as ShippingIcon,
-  Category as CategoryIcon,
-  TrendingUp as TrendingIcon,
-  Refresh as RefreshIcon,
-  Error as ErrorIcon,
-  Info as InfoIcon,
-  ArrowForward as ArrowForwardIcon
+import {
+  Menu as MenuIcon,
+  ArrowForward as ArrowForwardIcon,
+  PhoneInTalk as PhoneIcon,
+  Email as EmailIcon,
+  LocationOn as LocationIcon,
+  ShoppingCart as CartIcon
 } from '@mui/icons-material';
-import { Carousel } from 'react-responsive-carousel';
-import 'react-responsive-carousel/lib/styles/carousel.min.css';
 import pb from '../pocketbase';
-import { useCart } from '../contexts/CartContext';
-import { useSnackbar } from 'notistack';
-import { useUser } from '../contexts/UserContext';
 
 const ProductsScreen = () => {
   const navigate = useNavigate();
   const theme = useTheme();
-  const { enqueueSnackbar } = useSnackbar();
-  const { cart, updateCart } = useCart();
-  const { user } = useUser();
   
+  // Responsive breakpoints
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const isTablet = useMediaQuery(theme.breakpoints.between('sm', 'md'));
-  const isLargeScreen = useMediaQuery(theme.breakpoints.up('lg'));
   
-  const [banners, setBanners] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [allProducts, setAllProducts] = useState([]); // Single source of truth for products
+  // State management
+  const [services, setServices] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [bannersLoading, setBannersLoading] = useState(true);
-  const [categoriesLoading, setCategoriesLoading] = useState(true);
-  const [productsLoading, setProductsLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [page, setPage] = useState(1);
-  const [hasMore, setHasMore] = useState(true);
-  const [wishlistLoading, setWishlistLoading] = useState({});
-  const [cartLoading, setCartLoading] = useState({});
-  const [error, setError] = useState(null);
-  const [wishlistItems, setWishlistItems] = useState([]);
-  const [refreshing, setRefreshing] = useState(false);
-  const [imageLoadErrors, setImageLoadErrors] = useState({});
-
-  // Ref for intersection observer
-  const observerRef = useRef(null);
-  const loadMoreRef = useRef(null);
-
-  // Determine grid columns based on screen size
-  const getGridColumns = () => {
-    if (isMobile) return 6; // 2 columns
-    if (isTablet) return 4; // 3 columns
-    if (isLargeScreen) return 2.4; // 5 columns
-    return 3; // 4 columns by default
-  };
-
-  // Fetch user's wishlist items
-  const fetchUserWishlist = useCallback(async () => {
-    if (!user) {
-      setWishlistItems([]);
-      return [];
-    }
-
-    if(localStorage.getItem('userType') === 'guest') {
-      setWishlistItems([]);
-      return [];
-    }
-    
-    try {
-      const userData = await pb.collection('users').getOne(user.id);
-      const wishlist = userData.wishlist || [];
-      setWishlistItems(wishlist);
-      return wishlist;
-    } catch (error) {
-      console.error('Error fetching wishlist:', error);
-      return [];
-    }
-  }, [user]);
-
-  // Fetch banners with retry mechanism
-  const fetchBanners = useCallback(async (retryCount = 0) => {
-    try {
-      setBannersLoading(true);
-      const bannerRecords = await pb.collection('banners').getFullList({
-        sort: 'created',
-      });
-      setBanners(bannerRecords);
-      return true;
-    } catch (error) {
-      console.error('Error fetching banners:', error);
-      if (retryCount < 3) {
-        // Retry after a delay
-        setTimeout(() => fetchBanners(retryCount + 1), 1000 * (retryCount + 1));
-      }
-      return false;
-    } finally {
-      setBannersLoading(false);
-    }
-  }, []);
-
-  // Fetch categories with retry mechanism
-  const fetchCategories = useCallback(async (retryCount = 0) => {
-    try {
-      setCategoriesLoading(true);
-      const categoryRecords = await pb.collection('categories').getFullList({
-        filter: 'featured=true',
-        sort: 'name',
-        limit: 10,
-      });
-      setCategories(categoryRecords);
-      return true;
-    } catch (error) {
-      console.error('Error fetching categories:', error);
-      if (retryCount < 3) {
-        // Retry after a delay
-        setTimeout(() => fetchCategories(retryCount + 1), 1000 * (retryCount + 1));
-      }
-      return false;
-    } finally {
-      setCategoriesLoading(false);
-    }
-  }, []);
-
-  // Fetch all products in one go
-  const fetchAllProducts = useCallback(async (pageNum = 1, refresh = false, retryCount = 0) => {
-    try {
-      if (refresh) {
-        setProductsLoading(true);
-      }
-      
-      // Get user's wishlist first
-      const wishlist = await fetchUserWishlist();
-      
-      const perPage = 24; // Increased page size to reduce requests
-      const productRecords = await pb.collection('products').getList(pageNum, perPage, {
-        sort: '-created',
-        expand: 'seller',
-      });
-
-      // Filter verified sellers and add wishlist status
-      const productsFiltered = productRecords.items
-        .filter(product => product.expand?.seller?.admin_verified && product.status === 'published')
-        .map(product => ({
-          ...product,
-          wishlist: wishlist.includes(product.id)
-        }));
-
-      if (refresh) {
-        setAllProducts(productsFiltered);
-      } else {
-        setAllProducts(prev => [...prev, ...productsFiltered]);
-      }
-
-      setHasMore(productRecords.items.length === perPage);
-      setPage(pageNum);
-      setError(null);
-      return true;
-    } catch (error) {
-      console.error('Error fetching products:', error);
-      
-      if (retryCount < 3) {
-        // Retry after a delay
-        setTimeout(() => fetchAllProducts(pageNum, refresh, retryCount + 1), 1000 * (retryCount + 1));
-      } else {
-        setError('Failed to load products. Please refresh to try again.');
-      }
-      return false;
-    } finally {
-      setProductsLoading(false);
-      setLoadingMore(false);
-    }
-  }, [fetchUserWishlist]);
-
-  // Initial data fetch
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    
-    // Fetch all data in parallel
-    await Promise.all([
-      fetchBanners(),
-      fetchCategories(),
-      fetchAllProducts(1, true)
-    ]);
-    
-    setLoading(false);
-  }, [fetchBanners, fetchCategories, fetchAllProducts]);
-
-  // Handle refresh
-  const handleRefresh = async () => {
-    setRefreshing(true);
-    await fetchData();
-    setRefreshing(false);
-  };
-
-  // Handle image load error
-  const handleImageError = (productId, imageSrc) => {
-    setImageLoadErrors(prev => ({
-      ...prev,
-      [productId]: {
-        src: imageSrc,
-        retryCount: (prev[productId]?.retryCount || 0) + 1
-      }
-    }));
-  };
-
-  // Toggle wishlist
-  const toggleWishlist = async (productId, currentStatus) => {
-    if (!user) {
-      enqueueSnackbar('Please login to manage wishlist', { 
-        variant: 'warning',
-        anchorOrigin: { vertical: 'top', horizontal: 'center' }
-      });
-      navigate('/login');
-      return;
-    }
-
-    try {
-      setWishlistLoading(prev => ({ ...prev, [productId]: true }));
-      
-      const userData = await pb.collection('users').getOne(user.id);
-      let wishlist = userData.wishlist || [];
-      
-      if (currentStatus) {
-        wishlist = wishlist.filter(id => id !== productId);
-      } else {
-        wishlist = [...wishlist, productId];
-      }
-
-      await pb.collection('users').update(user.id, { wishlist });
-      setWishlistItems(wishlist);
-      
-      // Update products in the single source of truth
-      setAllProducts(prev => 
-        prev.map(p => 
-          p.id === productId ? { ...p, wishlist: !currentStatus } : p
-        )
-      );
-
-      enqueueSnackbar(
-        currentStatus ? 'Removed from wishlist' : 'Added to wishlist',
-        { 
-          variant: 'success',
-          anchorOrigin: { vertical: 'top', horizontal: 'center' },
-          autoHideDuration: 1500
-        }
-      );
-    } catch (error) {
-      console.error('Error updating wishlist:', error);
-      enqueueSnackbar('Failed to update wishlist', { 
-        variant: 'error',
-        anchorOrigin: { vertical: 'top', horizontal: 'center' }
-      });
-    } finally {
-      setWishlistLoading(prev => ({ ...prev, [productId]: false }));
-    }
-  };
-
-  // Add to cart handler
-  const addToCartHandler = async (product) => {
-    if (!user) {
-      enqueueSnackbar('Please login to add to cart', { 
-        variant: 'warning',
-        anchorOrigin: { vertical: 'top', horizontal: 'center' }
-      });
-      navigate('/login');
-      return;
-    }
-
-    // Check if the product is already in cart
-    const isInCart = cart && cart[product.id] && cart[product.id].quantity > 0;
-    
-    try {
-      setCartLoading(prev => ({ ...prev, [product.id]: true }));
-      
-      const userData = await pb.collection('users').getOne(user.id);
-      const currentCart = userData.cart || {};
-      
-      if (isInCart) {
-        // Navigate to cart if already added
-        navigate('/cart');
-        return;
-      }
-      
-      if (currentCart[product.id]) {
-        currentCart[product.id].quantity += 1;
-      } else {
-        currentCart[product.id] = { ...product, quantity: 1 };
-      }
-
-      await pb.collection('users').update(user.id, { cart: currentCart });
-      updateCart(currentCart);
-      
-      enqueueSnackbar('Added to cart successfully', { 
-        variant: 'success',
-        anchorOrigin: { vertical: 'top', horizontal: 'center' },
-        autoHideDuration: 1500
-      });
-    } catch (error) {
-      console.error('Error adding to cart:', error);
-      enqueueSnackbar('Failed to add to cart', { 
-        variant: 'error',
-        anchorOrigin: { vertical: 'top', horizontal: 'center' }
-      });
-    } finally {
-      setCartLoading(prev => ({ ...prev, [product.id]: false }));
-    }
-  };
-
-  // Navigate to product detail
-  const navigateToProduct = (productId) => {
-    // get slug using the product id
-    const slug = allProducts.find(product => product.id === productId)?.slug;
-    // navigate(`/product/${productId}`);
-    navigate(`/product/${slug}`);
-  };
-
-  // Load more products with infinite scroll
-  const loadMoreProducts = () => {
-    if (!loadingMore && hasMore && !productsLoading) {
-      setLoadingMore(true);
-      fetchAllProducts(page + 1);
-    }
-  };
-
-  // Setup intersection observer for infinite scroll
+  const [menuOpen, setMenuOpen] = useState(false);
+  
+  // Fetch services from PocketBase
   useEffect(() => {
-    if (loadMoreRef.current && !productsLoading && !loadingMore && hasMore) {
-      const options = {
-        root: null,
-        rootMargin: '100px',
-        threshold: 0.1,
-      };
-      
-      const observer = new IntersectionObserver((entries) => {
-        if (entries[0].isIntersecting) {
-          loadMoreProducts();
-        }
-      }, options);
-      
-      observer.observe(loadMoreRef.current);
-      observerRef.current = observer;
-      
-      return () => {
-        if (observerRef.current) {
-          observerRef.current.disconnect();
-        }
-      };
-    }
-  }, [productsLoading, loadingMore, hasMore, allProducts.length]);
-
-  // Initial data load
-  useEffect(() => {
-    fetchData();
-    
-    // Cleanup function
-    return () => {
-      if (observerRef.current) {
-        observerRef.current.disconnect();
+    const fetchServices = async () => {
+      try {
+        setLoading(true);
+        // Assuming 'services' is the collection name in PocketBase
+        const serviceRecords = await pb.collection('products').getList(1, 2, {
+          sort: '-created',
+        });
+        
+        setServices(serviceRecords.items);
+      } catch (error) {
+        console.error('Error fetching services:', error);
+      } finally {
+        setLoading(false);
       }
     };
-  }, [fetchData]);
-
-  // Get trending products from the main product array
-  const getTrendingProducts = useCallback(() => {
-    if (!allProducts.length) return [];
     
-    // Filter for products with high ratings and sort by view_count
-    return [...allProducts]
-      .filter(product => product.rating >= 4)
-      .sort((a, b) => (b.view_count || 0) - (a.view_count || 0))
-      .slice(0, 8); // Limit to top 8
-  }, [allProducts]);
-
-  // Product card component for reuse
-  const ProductCard = ({ product }) => {
+    fetchServices();
+  }, []);
+  
+  // Toggle menu drawer
+  const toggleMenu = () => {
+    setMenuOpen(!menuOpen);
+  };
+  
+  // Service Card Component
+  const ServiceCard = ({ service }) => {
     const {
       id,
       title,
-      price,
-      compare_price,
-      images,
-      rating,
-      review_count,
-      stock,
-      wishlist,
-      delivery_charge // Added this to access the delivery charge
-    } = product;
+      description,
+      image,
+      price
+    } = service;
     
-    // Get image source with retry logic
+    // Get image or fallback to placeholder
     const getImageSrc = () => {
-      if (!images || !images.length) return 'https://via.placeholder.com/300';
-      
-      // Check if we've hit retry limit for this image
-      const errorInfo = imageLoadErrors[id];
-      if (errorInfo && errorInfo.retryCount > 2) {
-        return 'https://via.placeholder.com/300?text=Image+Not+Available';
-      }
-      
-      // Use normal image path
-      return pb.files.getUrl(product, images[0]);
+      if (!image) return 'https://via.placeholder.com/600x400?text=Alpha+Soft+Service';
+      return pb.files.getUrl(service, image);
     };
     
-    const imageSrc = getImageSrc();
-    
-    // Fixed calculation: Compare price is the original higher price, price is the selling price
-    const hasDiscount = compare_price && price && compare_price > price;
-    const discountPercentage = hasDiscount
-      ? Math.round(((compare_price - price) / compare_price) * 100)
-      : 0;
-    
-    // Check if delivery is free
-    const isFreeDelivery = delivery_charge === 0;
-    
-    // Truncate title after 20 chars
-    const truncatedTitle = title && title.length > 15 
-      ? title.slice(0, 15) + '...' 
-      : title;
-    
-    const isOutOfStock = stock === 0;
-  
     return (
       <Card 
-        elevation={0}
+        elevation={2}
         sx={{ 
           height: '100%', 
           display: 'flex', 
           flexDirection: 'column',
           borderRadius: 2,
-          border: `1px solid ${theme.palette.grey[200]}`,
           transition: 'all 0.3s ease',
           '&:hover': {
-            boxShadow: '0 8px 20px rgba(0,0,0,0.1)',
             transform: 'translateY(-5px)',
+            boxShadow: '0 12px 20px rgba(0,0,0,0.1)',
           }
         }}
       >
-        {/* Product Image with wishlist button */}
-        <Box sx={{ position: 'relative' }}>
-          <CardMedia
-            component="img"
-            src={imageSrc}
-            alt={title}
-            height={isMobile ? 150 : 180}
-            width="100%"
-            onClick={() => navigateToProduct(id)}
-            onError={() => handleImageError(id, imageSrc)}
-            sx={{ 
-              objectFit: 'cover', 
-              cursor: 'pointer',
-              borderTopLeftRadius: 8,
-              borderTopRightRadius: 8
-            }}
-          />
-          
-          {/* Badges Container - for multiple badges */}
-          <Box sx={{ position: 'absolute', top: 8, left: 8, display: 'flex', flexDirection: 'column', gap: 1 }}>
-            {/* Discount badge */}
-            {hasDiscount && (
-              <Chip
-                label={`${discountPercentage}% OFF`}
-                color="error"
-                size="small"
-                sx={{ 
-                  fontWeight: 'bold',
-                  fontSize: '0.7rem'
-                }}
-              />
-            )}
-            
-            {/* Free delivery badge */}
-            {isFreeDelivery && (
-              <Chip
-                label="Free Delivery"
-                color="success"
-                size="small"
-                sx={{ 
-                  fontWeight: 'bold',
-                  fontSize: '0.7rem'
-                }}
-              />
-            )}
-          </Box>
-          
-          {/* Out of stock overlay */}
-          {isOutOfStock && (
-            <Box 
-              sx={{
-                position: 'absolute',
-                top: 0,
-                left: 0,
-                right: 0,
-                bottom: 0,
-                backgroundColor: 'rgba(0,0,0,0.5)',
-                display: 'flex',
-                justifyContent: 'center',
-                alignItems: 'center',
-                borderTopLeftRadius: 8,
-                borderTopRightRadius: 8
-              }}
-            >
-              <Typography 
-                variant="subtitle1" 
-                sx={{ 
-                  color: 'white', 
-                  fontWeight: 'bold',
-                  textTransform: 'uppercase',
-                  backgroundColor: 'rgba(0,0,0,0.6)',
-                  px: 2,
-                  py: 0.5,
-                  borderRadius: 1
-                }}
-              >
-                Out of Stock
-              </Typography>
-            </Box>
-          )}
-          
-          {/* Wishlist button */}
-          <IconButton
-            color={wishlist ? "error" : "default"}
-            aria-label="add to favorites"
-            onClick={(e) => {
-              e.stopPropagation();
-              toggleWishlist(id, wishlist);
-            }}
-            disabled={wishlistLoading[id]}
-            sx={{ 
-              position: 'absolute', 
-              top: 4, 
-              right: 4,
-              backgroundColor: 'rgba(255,255,255,0.8)',
-              '&:hover': { backgroundColor: 'rgba(255,255,255,0.9)' },
-              zIndex: 2,
-              padding: 1
-            }}
-          >
-            {wishlistLoading[id] ? (
-              <CircularProgress size={20} />
-            ) : wishlist ? (
-              <FavoriteIcon fontSize="small" />
-            ) : (
-              <FavoriteBorderIcon fontSize="small" />
-            )}
-          </IconButton>
-        </Box>
-        
-        {/* Product content */}
-        <CardContent 
-          sx={{ 
-            flexGrow: 1, 
-            p: 2, 
-            pt: 1.5,
-            '&:last-child': { pb: 1.5 }
-          }}
-          onClick={() => navigateToProduct(id)}
-        >
+        <CardMedia
+          component="img"
+          height={200}
+          image={getImageSrc()}
+          alt={title}
+          sx={{ objectFit: 'cover' }}
+        />
+        <CardContent sx={{ flexGrow: 1, p: 3 }}>
           <Typography 
-            variant="subtitle2"
+            variant="h5" 
+            component="h2"
             sx={{ 
-              mb: 0.5, 
-              display: '-webkit-box',
-              WebkitLineClamp: 2,
-              WebkitBoxOrient: 'vertical',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              height: '2.5em',
-              fontSize: { xs: '0.8rem', sm: '0.875rem' },
-              fontWeight: 500,
-              cursor: 'pointer',
-              color: theme.palette.text.primary
+              mb: 1, 
+              fontWeight: 600,
+              color: theme.palette.primary.main
             }}
           >
-            {truncatedTitle}
+            {title}
           </Typography>
-          
-          {/* Ratings */}
-          {rating > 0 && (
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5, mt: 0.5 }}>
-              <Rating 
-                value={rating} 
-                readOnly 
-                precision={0.5} 
-                size="small"
-                sx={{ fontSize: { xs: '0.8rem', sm: '1rem' } }}
-              />
-              <Typography 
-                variant="caption" 
-                color="text.secondary"
-                sx={{ ml: 0.5, fontSize: { xs: '0.7rem', sm: '0.75rem' } }}
-              >
-                {rating.toFixed(1)} {review_count > 0 && `(${review_count})`}
-              </Typography>
-            </Box>
-          )}
-          
-          {/* Price information - Fixed to use price and compare_price correctly */}
-          <Box sx={{ mt: 0.5, display: 'flex', alignItems: 'baseline' }}>
-            <Typography 
-              variant="subtitle1" 
-              component="span"
-              sx={{ 
-                fontWeight: 'bold',
-                color: theme.palette.text.primary,
-                fontSize: { xs: '1rem', sm: '1.1rem' }
-              }}
-            >
-              ৳{price.toFixed(2)}
-            </Typography>
-            
-            {hasDiscount && (
-              <Typography 
-                variant="body2" 
-                component="span" 
-                sx={{ 
-                  textDecoration: 'line-through', 
-                  color: 'text.secondary',
-                  ml: 1,
-                  fontSize: { xs: '0.75rem', sm: '0.85rem' }
-                }}
-              >
-                ৳{compare_price.toFixed(2)}
-              </Typography>
-            )}
-            
-          </Box>
-        </CardContent>
-        
-        {/* Action buttons */}
-        <CardActions sx={{ p: 2, pt: 0 }}>
-          <Button
-            variant="contained"
-            color="primary"
-            fullWidth
-            size="small"
-            startIcon={cartLoading[id] ? <CircularProgress size={16} color="inherit" /> : <CartIcon />}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (!isOutOfStock) {
-                addToCartHandler(product);
-              }
-            }}
-            disabled={cartLoading[id] || isOutOfStock}
+          <Typography 
+            variant="subtitle1" 
+            color="text.secondary"
             sx={{ 
-              textTransform: 'none',
-              fontWeight: 500,
-              borderRadius: 6,
-              fontSize: { xs: '0.7rem', sm: '0.8rem' }
+              mb: 2,
+              fontWeight: 500
             }}
           >
-            {cart && cart[id] ? 'View Cart' : 'Add to Cart'}
+            {price && `Starting at $${price}`}
+          </Typography>
+          <Typography variant="body1">
+            {description}
+          </Typography>
+        </CardContent>
+        <CardActions sx={{ p: 3, pt: 0 }}>
+          <Button 
+            variant="contained" 
+            color="primary" 
+            fullWidth
+            size="large"
+            endIcon={<ArrowForwardIcon />}
+            onClick={() => navigate(`/service/${id}`)}
+            sx={{ 
+              borderRadius: 2,
+              py: 1.5,
+              textTransform: 'none',
+              fontWeight: 600,
+              fontSize: '1rem'
+            }}
+          >
+            Learn More
           </Button>
         </CardActions>
       </Card>
     );
   };
-
-  // Skeleton loader for products
-  const ProductSkeleton = () => (
-    <Card elevation={0} sx={{ height: '100%', borderRadius: 2, border: `1px solid ${theme.palette.grey[200]}` }}>
-      <Skeleton variant="rectangular" height={isMobile ? 150 : 180} width="100%" sx={{ borderTopLeftRadius: 8, borderTopRightRadius: 8 }} />
-      <CardContent sx={{ p: 2 }}>
-        <Skeleton variant="text" width="80%" height={20} />
-        <Skeleton variant="text" width="60%" height={20} />
-        <Box sx={{ display: 'flex', alignItems: 'center', mt: 1, mb: 1.5 }}>
-          <Skeleton variant="rectangular" width={100} height={20} sx={{ borderRadius: 1 }} />
-          <Skeleton variant="rectangular" width={40} height={20} sx={{ ml: 1, borderRadius: 1 }} />
-        </Box>
-        <Skeleton variant="rectangular" width="100%" height={36} sx={{ borderRadius: 6, mt: 1 }} />
-      </CardContent>
-    </Card>
+  
+  // Service loading skeleton
+  const ServiceSkeleton = () => (
+    <Paper 
+      elevation={1}
+      sx={{ 
+        height: '100%', 
+        borderRadius: 2,
+        overflow: 'hidden',
+        bgcolor: 'rgba(0,0,0,0.04)'
+      }}
+    >
+      <Box sx={{ height: 200, bgcolor: 'rgba(0,0,0,0.08)' }} />
+      <Box sx={{ p: 3 }}>
+        <Box sx={{ height: 32, width: '70%', mb: 1, bgcolor: 'rgba(0,0,0,0.08)' }} />
+        <Box sx={{ height: 24, width: '40%', mb: 2, bgcolor: 'rgba(0,0,0,0.08)' }} />
+        <Box sx={{ height: 20, width: '100%', mb: 1, bgcolor: 'rgba(0,0,0,0.08)' }} />
+        <Box sx={{ height: 20, width: '90%', mb: 1, bgcolor: 'rgba(0,0,0,0.08)' }} />
+        <Box sx={{ height: 20, width: '95%', mb: 2, bgcolor: 'rgba(0,0,0,0.08)' }} />
+        <Box sx={{ height: 48, width: '100%', bgcolor: 'rgba(0,0,0,0.08)', borderRadius: 2 }} />
+      </Box>
+    </Paper>
   );
 
-  // Get trending products for display
-  const trendingProducts = getTrendingProducts();
-  const trendingLoading = productsLoading;
-
   return (
-    <Container maxWidth="xl" disableGutters sx={{ overflowX: 'hidden' }}>
-      {/* Refresh button for mobile */}
-      {isMobile && (
-        <Box sx={{ 
-          position: 'fixed', 
-          bottom: 16, 
-          right: 16, 
-          zIndex: 10 
-        }}>
-          <Tooltip title="Refresh">
-            <Fade in={!refreshing}>
-              <IconButton 
-                color="primary"
-                size="large"
-                onClick={handleRefresh}
-                disabled={refreshing}
-                sx={{ 
-                  backgroundColor: 'white', 
-                  boxShadow: 2,
-                  '&:hover': { backgroundColor: '#f5f5f5' }
-                }}
-              >
-                {refreshing ? 
-                  <CircularProgress size={24} /> : 
-                  <RefreshIcon />
-                }
-              </IconButton>
-            </Fade>
-          </Tooltip>
-        </Box>
-      )}
-
-      {/* Main content area */}
-      <Box sx={{ px: { xs: 1.5, sm: 2, md: 3 }, pt: 2, pb: 8 }}>
-        {/* Display any errors */}
-        {error && (
-          <Paper 
-            elevation={0} 
-            sx={{ 
-              p: 2, 
-              mb: 3, 
-              backgroundColor: 'error.light',
-              color: 'error.dark',
-              borderRadius: 2,
-              display: 'flex',
-              alignItems: 'center'
-            }}
-          >
-            <ErrorIcon sx={{ mr: 1 }} />
-            <Typography variant="body2">{error}</Typography>
-            <Button 
-              variant="contained" 
-              color="primary" 
-              size="small" 
-              sx={{ ml: 'auto' }}
-              onClick={handleRefresh}
-              startIcon={<RefreshIcon />}
-            >
-              Retry
-            </Button>
-          </Paper>
-        )}
-
-        {/* Banner Carousel */}
-        <Box sx={{ mb: 4 }}>
-          {bannersLoading ? (
-            <Skeleton 
-              variant="rectangular" 
-              width="100%" 
-              height={{ xs: 180, sm: 300, md: 400 }}
-              sx={{ borderRadius: 2 }}
-            />
-          ) : banners.length > 0 ? (
-            <Paper elevation={2} sx={{ borderRadius: 2, overflow: 'hidden' }}>
-              <Carousel
-                autoPlay
-                infiniteLoop
-                showThumbs={false}
-                showStatus={false}
-                showArrows={!isMobile}
-                showIndicators={true}
-                stopOnHover
-                interval={5000}
-                swipeable={true}
-                emulateTouch={true}
-              >
-                {banners.map((banner) => (
-                  <Box 
-                    key={banner.id}
-                    onClick={() => banner.link && navigate('/webview', { state: { url: banner.link } })}
-                    sx={{ cursor: banner.link ? 'pointer' : 'default', position: 'relative' }}
-                  >
-                    <Box
-                      component="img"
-                      src={pb.files.getUrl(banner, banner.image)}
-                      alt={banner.title || 'Banner'}
-                      height={{ xs: 180, sm: 300, md: 400 }}
-                      width="100%"
-                      sx={{ 
-                        objectFit: 'cover',
-                        display: 'block'
-                      }}
-                    />
-                    {banner.title && (
-                      <Box
-                        sx={{
-                          position: 'absolute',
-                          bottom: 0,
-                          left: 0,
-                          right: 0,
-                          p: { xs: 2, sm: 3 },
-                          background: 'linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0) 100%)',
-                          color: 'white',
-                          textAlign: 'left'
-                        }}
-                      >
-                        <Typography 
-                          variant={isMobile ? "h6" : "h5"} 
-                          fontWeight="bold"
-                          sx={{ 
-                            textShadow: '1px 1px 3px rgba(0,0,0,0.7)',
-                            mb: 1
-                          }}
-                        >
-                          {banner.title}
-                        </Typography>
-                        {banner.description && (
-                          <Typography 
-                            variant="body2"
-                            sx={{ 
-                              display: { xs: 'none', sm: 'block' },
-                              mb: 1,
-                              textShadow: '1px 1px 2px rgba(0,0,0,0.8)'
-                            }}
-                          >
-                            {banner.description}
-                          </Typography>
-                        )}
-                        {banner.link && (
-                          <Button 
-                            variant="contained" 
-                            color="primary"
-                            size={isMobile ? "small" : "medium"} 
-                            sx={{ 
-                              mt: 1, 
-                              borderRadius: 5,
-                              px: 3,
-                              textTransform: 'none',
-                              boxShadow: 3
-                            }}
-                            endIcon={<ArrowForwardIcon />}
-                          >
-                            Shop Now
-                          </Button>
-                        )}
-                      </Box>
-                    )}
-                  </Box>
-                ))}
-              </Carousel>
-            </Paper>
-          ) : null}
-        </Box>
-
-        {/* Categories Section */}
-        <Box sx={{ mb: 4 }}>
-          <Box sx={{ 
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            mb: 2
-          }}>
-            <Typography 
-              variant="h6" 
+    <Box sx={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
+      {/* Header with sticky navigation */}
+      <AppBar 
+        position="sticky" 
+        color="default"
+        elevation={0}
+        sx={{ 
+          bgcolor: 'background.paper',
+          borderBottom: '1px solid',
+          borderColor: 'divider'
+        }}
+      >
+        <Container maxWidth="lg">
+          <Toolbar sx={{ px: { xs: 1, sm: 2 } }}>
+            <Box 
               sx={{ 
                 display: 'flex', 
+                flexGrow: 1,
                 alignItems: 'center',
-                fontWeight: 600,
-                color: 'text.primary'
+                cursor: 'pointer'
               }}
+              onClick={() => navigate('/')}
             >
-              <CategoryIcon sx={{ mr: 1, color: 'primary.main' }} /> 
-              Shop by Category
-            </Typography>
-            <Button 
-              variant="text" 
-              color="primary"
-              size="small"
-              endIcon={<ArrowForwardIcon />}
-              onClick={() => navigate('/categories')}
-              sx={{ textTransform: 'none' }}
-            >
-              View All
-            </Button>
-          </Box>
-          
-          {categoriesLoading ? (
-            <Box sx={{ 
-              display: 'flex',
-              gap: 2,
-              overflowX: 'auto',
-              py: 1,
-              '&::-webkit-scrollbar': { height: 6 },
-              '&::-webkit-scrollbar-track': { bgcolor: 'background.paper' },
-              '&::-webkit-scrollbar-thumb': { bgcolor: 'primary.light', borderRadius: 3 }
-            }}>
-              {Array(6).fill(0).map((_, index) => (
-                <Box key={index} sx={{ minWidth: 90, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-                  <Skeleton variant="circular" width={80} height={80} />
-                  <Skeleton variant="text" width={60} height={24} sx={{ mt: 1 }} />
-                </Box>
-              ))}
-            </Box>
-          ) : categories.length > 0 ? (
-            <Box sx={{ 
-              display: 'flex',
-              gap: 2,
-              overflowX: 'auto',
-              py: 1,
-              '&::-webkit-scrollbar': { height: 6 },
-              '&::-webkit-scrollbar-track': { bgcolor: 'background.paper' },
-              '&::-webkit-scrollbar-thumb': { bgcolor: 'primary.light', borderRadius: 3 }
-            }}>
-              {categories.map((category) => (
-                <Box
-                  key={category.id}
-                  onClick={() => navigate(`/category/${category.id}`)}
-                  sx={{
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    minWidth: 90,
-                    cursor: 'pointer',
-                    transition: 'transform 0.2s, opacity 0.2s',
-                    '&:hover': { 
-                      transform: 'translateY(-5px)',
-                      '& img': { borderColor: 'primary.main' },
-                      '& .category-name': { color: 'primary.main' }
-                    }
-                  }}
-                >
-                  <img
-                    src={pb.files.getUrl(category, category.image)}
-                    alt={category.name}
-                    width={80}
-                    height={80}
-                    style={{
-                      borderRadius: '50%',
-                      objectFit: 'cover',
-                      border: '2px solid',
-                      borderColor: theme.palette.grey[300],
-                      transition: 'border-color 0.3s'
-                    }}
-                  />
-                  <Typography 
-                    variant="body2" 
-                    textAlign="center"
-                    className="category-name"
-                    sx={{ 
-                      mt: 1,
-                      fontWeight: 500,
-                      transition: 'color 0.3s',
-                      fontSize: { xs: '0.8rem', sm: '0.875rem' }
-                    }}
-                  >
-                    {category.name}
-                  </Typography>
-                </Box>
-              ))}
-            </Box>
-          ) : null}
-        </Box>
-        
-        {/* Trending Products Section - Using filtered data from the main products array */}
-        {(trendingLoading || trendingProducts.length > 0) && (
-          <Box sx={{ mb: 4 }}>
-            <Box sx={{ 
-              display: 'flex',
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              mb: 2
-            }}>
               <Typography 
-                variant="h6" 
+                variant="h5" 
+                component="h1" 
                 sx={{ 
-                  display: 'flex', 
+                  fontWeight: 700,
+                  color: theme.palette.primary.main,
+                  display: 'flex',
                   alignItems: 'center',
-                  fontWeight: 600,
-                  color: 'text.primary'
+                  '& span': {
+                    color: theme.palette.secondary.main
+                  }
                 }}
               >
-                <TrendingIcon sx={{ mr: 1, color: 'primary.main' }} /> 
-                Trending Products
+                Alpha<span>Soft</span>
               </Typography>
             </Box>
             
-            {trendingLoading ? (
-              <Box sx={{ 
-                display: 'flex',
-                gap: 2,
-                overflowX: 'auto',
-                py: 1,
-                pb: 1.5,
-                '&::-webkit-scrollbar': { height: 6 },
-                '&::-webkit-scrollbar-track': { bgcolor: 'background.paper' },
-                '&::-webkit-scrollbar-thumb': { bgcolor: 'primary.light', borderRadius: 3 }
-              }}>
-                {Array(4).fill(0).map((_, index) => (
-                  <Box key={index} sx={{ minWidth: 220, maxWidth: 280 }}>
-                    <ProductSkeleton />
-                  </Box>
-                ))}
+            {!isMobile && (
+              <Box sx={{ display: 'flex', gap: 2 }}>
+                <Button color="inherit" onClick={() => navigate('/services')}>
+                  Services
+                </Button>
+                <Button color="inherit" onClick={() => navigate('/about')}>
+                  About
+                </Button>
+                <Button color="inherit" onClick={() => navigate('/contact')}>
+                  Contact
+                </Button>
+                <Button 
+                  variant="contained" 
+                  color="primary"
+                  startIcon={<CartIcon />}
+                  onClick={() => navigate('/store')}
+                  sx={{ 
+                    ml: 1,
+                    borderRadius: 2,
+                    textTransform: 'none'
+                  }}
+                >
+                  Shop Now
+                </Button>
               </Box>
-            ) : trendingProducts.length > 0 ? (
-              <Box sx={{ 
-                display: 'flex',
-                gap: 2,
-                overflowX: 'auto',
-                py: 1,
-                pb: 1.5,
-                '&::-webkit-scrollbar': { height: 6 },
-                '&::-webkit-scrollbar-track': { bgcolor: 'background.paper' },
-                '&::-webkit-scrollbar-thumb': { bgcolor: 'primary.light', borderRadius: 3 }
-              }}>
-                {trendingProducts.map(product => (
-                  <Box key={product.id} sx={{ minWidth: 220, maxWidth: 280 }}>
-                    <ProductCard product={product} />
-                  </Box>
-                ))}
-              </Box>
-            ) : null}
-          </Box>
-        )}
-        
-        {/* Main Products Section */}
-        <Box sx={{ mb: 2 }}>
-          <Box sx={{ 
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            mb: 2
-          }}>
+            )}
+            
+            {isMobile && (
+              <IconButton 
+                edge="end" 
+                color="inherit" 
+                aria-label="menu"
+                onClick={toggleMenu}
+              >
+                <MenuIcon />
+              </IconButton>
+            )}
+          </Toolbar>
+        </Container>
+      </AppBar>
+      
+      {/* Mobile menu drawer */}
+      <Drawer
+        anchor="right"
+        open={menuOpen}
+        onClose={toggleMenu}
+        sx={{
+          '& .MuiDrawer-paper': {
+            width: '80%',
+            maxWidth: 300,
+          },
+        }}
+      >
+        <Box sx={{ p: 2, display: 'flex', flexDirection: 'column', height: '100%' }}>
+          <Typography 
+            variant="h6" 
+            component="div" 
+            sx={{ 
+              mb: 2, 
+              pb: 2, 
+              borderBottom: '1px solid',
+              borderColor: 'divider',
+              fontWeight: 700,
+              color: theme.palette.primary.main
+            }}
+          >
+            Alpha<span style={{ color: theme.palette.secondary.main }}>Soft</span>
+          </Typography>
+          <List>
+            <ListItem button onClick={() => { navigate('/services'); toggleMenu(); }}>
+              <ListItemText primary="Services" />
+            </ListItem>
+            <ListItem button onClick={() => { navigate('/about'); toggleMenu(); }}>
+              <ListItemText primary="About" />
+            </ListItem>
+            <ListItem button onClick={() => { navigate('/contact'); toggleMenu(); }}>
+              <ListItemText primary="Contact" />
+            </ListItem>
+          </List>
+          <Divider sx={{ my: 2 }} />
+          <Button 
+            variant="contained" 
+            color="primary"
+            fullWidth
+            startIcon={<CartIcon />}
+            onClick={() => { navigate('/store'); toggleMenu(); }}
+            sx={{ 
+              borderRadius: 2,
+              textTransform: 'none',
+              py: 1.5
+            }}
+          >
+            Shop Now
+          </Button>
+          <Box sx={{ flexGrow: 1 }} />
+          <Box sx={{ mt: 2 }}>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+              Contact Us:
+            </Typography>
             <Typography 
-              variant="h6" 
+              variant="body2" 
               sx={{ 
-                display: 'flex', 
+                display: 'flex',
                 alignItems: 'center',
-                fontWeight: 600,
-                color: 'text.primary'
+                mb: 0.5,
+                color: 'text.secondary',
+                '& svg': {
+                  mr: 1,
+                  fontSize: '1rem',
+                  color: theme.palette.primary.main
+                }
               }}
             >
-              <ShippingIcon sx={{ mr: 1, color: 'primary.main' }} /> 
-              New Arrivals
+              <PhoneIcon /> +1 (555) 123-4567
             </Typography>
-            {!isMobile && (
-              <Button 
-                variant="outlined" 
-                color="primary"
-                size="small"
-                startIcon={<RefreshIcon />}
-                onClick={handleRefresh}
-                disabled={refreshing}
-                sx={{ textTransform: 'none' }}
-              >
-                {refreshing ? 'Refreshing...' : 'Refresh'}
-              </Button>
-            )}
+            <Typography 
+              variant="body2" 
+              sx={{ 
+                display: 'flex',
+                alignItems: 'center',
+                color: 'text.secondary',
+                '& svg': {
+                  mr: 1,
+                  fontSize: '1rem',
+                  color: theme.palette.primary.main
+                }
+              }}
+            >
+              <EmailIcon /> info@alphasoft.com
+            </Typography>
           </Box>
-          
-          {productsLoading && allProducts.length === 0 ? (
-            <Grid container spacing={2}>
-              {Array(8).fill(0).map((_, index) => (
-                <Grid item xs={getGridColumns()} key={index}>
-                  <ProductSkeleton />
-                </Grid>
-              ))}
-            </Grid>
-          ) : allProducts.length > 0 ? (
-            <Grid container spacing={2}>
-              {allProducts.map(product => (
-                <Grid item xs={getGridColumns()} key={product.id}>
-                  <ProductCard product={product} />
-                </Grid>
-              ))}
-              
-              {/* Loading more indicator */}
-              {(loadingMore || hasMore) && (
-                <Grid item xs={12} ref={loadMoreRef} sx={{ mt: 2, display: 'flex', justifyContent: 'center' }}>
-                  {loadingMore && <CircularProgress size={32} />}
+        </Box>
+      </Drawer>
+      
+      <Box component="main" sx={{ flexGrow: 1 }}>
+        {/* Services Section - Coming first as per requirement */}
+        <Box 
+          sx={{ 
+            py: { xs: 4, md: 6 },
+            px: { xs: 2, sm: 3 },
+            bgcolor: 'background.default'
+          }}
+        >
+          <Container maxWidth="lg">
+            <Box 
+              sx={{ 
+                mb: 4, 
+                textAlign: 'center',
+                maxWidth: 800,
+                mx: 'auto'
+              }}
+            >
+              <Typography 
+                variant="h4" 
+                component="h2"
+                sx={{ 
+                  mb: 2,
+                  fontWeight: 700,
+                  color: theme.palette.text.primary
+                }}
+              >
+                Our Premium Services
+              </Typography>
+              <Typography 
+                variant="subtitle1" 
+                color="text.secondary"
+                sx={{ mb: 3 }}
+              >
+                Discover how Alpha Soft can transform your digital experience with our top-rated services
+              </Typography>
+            </Box>
+            
+            <Grid container spacing={3}>
+              {loading ? (
+                // Service loading skeletons
+                Array(2).fill(0).map((_, index) => (
+                  <Grid item xs={12} sm={6} key={index}>
+                    <ServiceSkeleton />
+                  </Grid>
+                ))
+              ) : services.length > 0 ? (
+                // Actual service cards
+                services.map(service => (
+                  <Grid item xs={12} sm={6} key={service.id}>
+                    <ServiceCard service={service} />
+                  </Grid>
+                ))
+              ) : (
+                // Fallback when no services are available
+                <Grid item xs={12}>
+                  <Paper sx={{ p: 4, textAlign: 'center', borderRadius: 2 }}>
+                    <Typography variant="h6" gutterBottom>
+                      Services Coming Soon
+                    </Typography>
+                    <Typography variant="body1" color="text.secondary">
+                      We're preparing amazing services for you. Check back soon!
+                    </Typography>
+                  </Paper>
                 </Grid>
               )}
             </Grid>
-          ) : (
-            <Paper 
-              elevation={0} 
-              sx={{ 
-                p: 4, 
-                textAlign: 'center',
-                borderRadius: 2,
-                border: `1px dashed ${theme.palette.grey[300]}`,
-                backgroundColor: 'background.paper'
-              }}
-            >
-              <InfoIcon sx={{ fontSize: 48, color: 'text.secondary', mb: 2 }} />
-              <Typography variant="h6" color="text.secondary" gutterBottom>
-                No Products Found
-              </Typography>
-              <Typography variant="body1" color="text.secondary" sx={{ mb: 2 }}>
-                We couldn't find any products matching your criteria.
-              </Typography>
+            
+            <Box sx={{ display: 'flex', justifyContent: 'center', mt: 4 }}>
               <Button 
-                variant="contained" 
+                variant="outlined" 
                 color="primary"
-                onClick={handleRefresh}
-                startIcon={<RefreshIcon />}
-                sx={{ borderRadius: 2 }}
+                endIcon={<ArrowForwardIcon />}
+                onClick={() => navigate('/services')}
+                sx={{ 
+                  borderRadius: 2,
+                  px: 4,
+                  py: 1.5,
+                  textTransform: 'none',
+                  fontWeight: 500,
+                  fontSize: '1rem'
+                }}
               >
-                Refresh Products
+                View All Services
               </Button>
-            </Paper>
-          )}
+            </Box>
+          </Container>
+        </Box>
+        
+        {/* Hero Banner Section */}
+        <Box
+          sx={{
+            py: { xs: 6, md: 10 },
+            position: 'relative',
+            bgcolor: theme.palette.primary.main,
+            color: 'white',
+            textAlign: 'center',
+            overflow: 'hidden',
+          }}
+        >
+          {/* Background Pattern */}
+          <Box
+            sx={{
+              position: 'absolute',
+              top: 0,
+              left: 0,
+              right: 0,
+              bottom: 0,
+              opacity: 0.1,
+              background: 'url("data:image/svg+xml,%3Csvg width="100" height="100" viewBox="0 0 100 100" xmlns="http://www.w3.org/2000/svg"%3E%3Cpath d="M11 18c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm48 25c3.866 0 7-3.134 7-7s-3.134-7-7-7-7 3.134-7 7 3.134 7 7 7zm-43-7c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm63 31c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM34 90c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zm56-76c1.657 0 3-1.343 3-3s-1.343-3-3-3-3 1.343-3 3 1.343 3 3 3zM12 86c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm28-65c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm23-11c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-6 60c2.21 0 4-1.79 4-4s-1.79-4-4-4-4 1.79-4 4 1.79 4 4 4zm29 22c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zM32 63c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm57-13c2.76 0 5-2.24 5-5s-2.24-5-5-5-5 2.24-5 5 2.24 5 5 5zm-9-21c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM60 91c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM35 41c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2zM12 60c1.105 0 2-.895 2-2s-.895-2-2-2-2 .895-2 2 .895 2 2 2z" fill="%23ffffff" fill-opacity="1" fill-rule="evenodd"/%3E%3C/svg%3E")',
+            }}
+          />
+          
+          <Container maxWidth="md">
+            <Fade in={true} timeout={1000}>
+              <Box>
+                <Typography 
+                  variant="h3" 
+                  component="h1"
+                  sx={{ 
+                    mb: 3,
+                    fontWeight: 800,
+                    textShadow: '0 2px 10px rgba(0,0,0,0.1)',
+                    fontSize: { xs: '2.5rem', md: '3.5rem' }
+                  }}
+                >
+                  Transform Your Digital Experience
+                </Typography>
+                
+                <Typography 
+                  variant="h6"
+                  sx={{ 
+                    mb: 4,
+                    maxWidth: 700,
+                    mx: 'auto',
+                    opacity: 0.9,
+                    lineHeight: 1.6
+                  }}
+                >
+                  Powerful eCommerce solutions built for speed and conversions
+                </Typography>
+                
+                <Button 
+                  variant="contained" 
+                  color="secondary"
+                  size="large"
+                  endIcon={<ArrowForwardIcon />}
+                  onClick={() => navigate('/store')}
+                  sx={{ 
+                    px: 4,
+                    py: 1.5,
+                    borderRadius: 2,
+                    textTransform: 'none',
+                    fontWeight: 600,
+                    fontSize: '1.1rem',
+                    boxShadow: '0 4px 14px rgba(0,0,0,0.2)',
+                    '&:hover': {
+                      boxShadow: '0 6px 20px rgba(0,0,0,0.3)',
+                    }
+                  }}
+                >
+                  Start Shopping
+                </Button>
+              </Box>
+            </Fade>
+          </Container>
         </Box>
 
-        {/* End of products message */}
-        {!hasMore && allProducts.length > 0 && (
-          <Box sx={{ 
-            textAlign: 'center', 
-            py: 4,
-            borderTop: `1px solid ${theme.palette.divider}`,
-            mt: 4
-          }}>
-            <Typography variant="body1" color="text.secondary">
-              You've reached the end of our products
-            </Typography>
-            <Button 
-              variant="outlined" 
-              color="primary"
-              sx={{ mt: 2, borderRadius: 2 }}
-              onClick={() => window.scrollTo({ top: 0, behavior: 'smooth' })}
+        {/* About Section */}
+        <Box 
+          sx={{ 
+            py: { xs: 5, md: 8 },
+            bgcolor: 'background.paper'
+          }}
+        >
+          <Container maxWidth="lg">
+            <Grid container spacing={4} alignItems="center">
+              <Grid item xs={12} md={6}>
+                <Box 
+                  sx={{
+                    p: { xs: 2, md: 4 }
+                  }}
+                >
+                  <Typography 
+                    variant="h4" 
+                    component="h2"
+                    sx={{ 
+                      mb: 3,
+                      fontWeight: 700,
+                      color: theme.palette.text.primary
+                    }}
+                  >
+                    About Alpha Soft
+                  </Typography>
+                  
+                  <Typography 
+                    variant="body1"
+                    sx={{ 
+                      mb: 3,
+                      color: 'text.secondary',
+                      lineHeight: 1.7
+                    }}
+                  >
+                    Alpha Soft is a premier eCommerce solutions provider dedicated to creating exceptional 
+                    digital experiences. With a focus on performance and user experience, we build
+                    platforms that help businesses scale and succeed.
+                  </Typography>
+                  
+                  <Typography 
+                    variant="body1"
+                    sx={{ 
+                      mb: 4,
+                      color: 'text.secondary',
+                      lineHeight: 1.7
+                    }}
+                  >
+                    Our team of experts combines technical excellence with creative design to deliver
+                    solutions that not only look great but perform exceptionally well on all devices.
+                  </Typography>
+                  
+                  <Button
+                    variant="outlined"
+                    color="primary"
+                    endIcon={<ArrowForwardIcon />}
+                    onClick={() => navigate('/about')}
+                    sx={{
+                      borderRadius: 2,
+                      px: 3,
+                      py: 1.2,
+                      textTransform: 'none',
+                      fontWeight: 500
+                    }}
+                  >
+                    Learn More About Us
+                  </Button>
+                </Box>
+              </Grid>
+              
+              <Grid item xs={12} md={6}>
+                <Box 
+                  sx={{
+                    display: 'flex',
+                    justifyContent: 'center',
+                    p: { xs: 2, md: 4 }
+                  }}
+                >
+                  <Box
+                    component="img"
+                    src="https://images.unsplash.com/photo-1460925895917-afdab827c52f?ixlib=rb-4.0.3&auto=format&fit=crop&w=800&q=80"
+                    alt="Team working at Alpha Soft"
+                    sx={{
+                      width: '100%',
+                      maxWidth: 500,
+                      height: 'auto',
+                      borderRadius: 4,
+                      boxShadow: '0 10px 30px rgba(0,0,0,0.1)',
+                    }}
+                  />
+                </Box>
+              </Grid>
+            </Grid>
+          </Container>
+        </Box>
+        
+        {/* How It Works Section */}
+        <Box 
+          sx={{ 
+            py: { xs: 5, md: 8 },
+            bgcolor: 'background.default'
+          }}
+        >
+          <Container maxWidth="lg">
+            <Box 
+              sx={{ 
+                mb: 5, 
+                textAlign: 'center',
+                maxWidth: 700,
+                mx: 'auto'
+              }}
             >
-              Back to Top
-            </Button>
-          </Box>
-        )}
+              <Typography 
+                variant="h4" 
+                component="h2"
+                sx={{ 
+                  mb: 2,
+                  fontWeight: 700,
+                  color: theme.palette.text.primary
+                }}
+              >
+                How It Works
+              </Typography>
+              <Typography 
+                variant="subtitle1" 
+                color="text.secondary"
+              >
+                Get started with Alpha Soft in three simple steps
+              </Typography>
+            </Box>
+            
+            <Grid container spacing={4} justifyContent="center">
+              {[
+                {
+                  step: 1,
+                  title: 'Choose Your Service',
+                  description: 'Browse our selection of premium eCommerce services and select the one that fits your needs.',
+                  icon: '🔍'
+                },
+                {
+                  step: 2,
+                  title: 'Customize Your Solution',
+                  description: 'Work with our team to customize the service to match your specific requirements and brand.',
+                  icon: '⚙️'
+                },
+                {
+                  step: 3,
+                  title: 'Launch & Grow',
+                  description: 'Go live with your new solution and start growing your online business with our ongoing support.',
+                  icon: '🚀'
+                }
+              ].map((item) => (
+                <Grid item xs={12} sm={6} md={4} key={item.step}>
+                  <Paper
+                    elevation={0}
+                    sx={{
+                      p: 4,
+                      height: '100%',
+                      borderRadius: 4,
+                      bgcolor: 'background.paper',
+                      border: '1px solid',
+                      borderColor: 'divider',
+                      textAlign: 'center',
+                      transition: 'all 0.3s ease',
+                      '&:hover': {
+                        transform: 'translateY(-8px)',
+                        boxShadow: '0 12px 30px rgba(0,0,0,0.08)'
+                      }
+                    }}
+                  >
+                    <Box 
+                      sx={{ 
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        width: 60,
+                        height: 60,
+                        borderRadius: '50%',
+                        bgcolor: 'primary.light',
+                        color: 'primary.main',
+                        fontSize: '1.5rem',
+                        mb: 3,
+                        mx: 'auto'
+                      }}
+                    >
+                      <Typography variant="h5" component="span">
+                        {item.icon}
+                      </Typography>
+                    </Box>
+                    
+                    <Typography 
+                      variant="h6" 
+                      component="h3"
+                      sx={{ 
+                        mb: 2,
+                        fontWeight: 600
+                      }}
+                    >
+                      {item.title}
+                    </Typography>
+                    
+                    <Typography 
+                      variant="body1"
+                      color="text.secondary"
+                      sx={{ mb: 2 }}
+                    >
+                      {item.description}
+                    </Typography>
+                    
+                    <Box 
+                      sx={{ 
+                        display: 'inline-block',
+                        borderRadius: '50%',
+                        bgcolor: 'primary.main',
+                        color: 'white',
+                        width: 36,
+                        height: 36,
+                        lineHeight: '36px',
+                        fontWeight: 'bold',
+                        mt: 2
+                      }}
+                    >
+                      {item.step}
+                    </Box>
+                  </Paper>
+                </Grid>
+              ))}
+            </Grid>
+          </Container>
+        </Box>
       </Box>
-    </Container>
+      
+      {/* Footer */}
+      <Box 
+        component="footer"
+        sx={{ 
+          py: 4,
+          mt: 'auto',
+          bgcolor: 'background.paper',
+          borderTop: '1px solid',
+          borderColor: 'divider'
+        }}
+      >
+        <Container maxWidth="lg">
+          <Grid container spacing={4}>
+            <Grid item xs={12} sm={6} md={4}>
+              <Typography 
+                variant="h6" 
+                component="h3"
+                sx={{ 
+                  mb: 2,
+                  fontWeight: 700,
+                  color: theme.palette.primary.main
+                }}
+              >
+                Alpha<span style={{ color: theme.palette.secondary.main }}>Soft</span>
+              </Typography>
+              <Typography 
+                variant="body2"
+                color="text.secondary"
+                sx={{ mb: 2 }}
+              >
+                Providing premium eCommerce solutions with a focus on performance, design, and user experience.
+              </Typography>
+              <Box sx={{ display: 'flex', gap: 2, mt: 3 }}>
+                {['facebook', 'twitter', 'linkedin', 'instagram'].map(social => (
+                  <Box
+                    key={social}
+                    component="a"
+                    href={`https://${social}.com`}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    sx={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      width: 36,
+                      height: 36,
+                      borderRadius: '50%',
+                      bgcolor: 'action.hover',
+                      color: 'text.primary',
+                      transition: 'all 0.2s',
+                      '&:hover': {
+                        bgcolor: 'primary.main',
+                        color: 'white',
+                      }
+                    }}
+                  >
+                    <Box 
+                      component="img"
+                      src={`https://cdn.jsdelivr.net/npm/simple-icons@v5/icons/${social}.svg`}
+                      alt={social}
+                      sx={{ width: 16, height: 16, filter: 'invert(0.5)' }}
+                    />
+                  </Box>
+                ))}
+              </Box>
+            </Grid>
+            
+            <Grid item xs={12} sm={6} md={4}>
+              <Typography 
+                variant="h6" 
+                component="h3"
+                sx={{ 
+                  mb: 2,
+                  fontWeight: 600,
+                }}
+              >
+                Quick Links
+              </Typography>
+              <Box component="nav">
+                <Box 
+                  component="ul"
+                  sx={{ 
+                    listStyle: 'none',
+                    p: 0,
+                    m: 0,
+                    '& li': {
+                      mb: 1
+                    },
+                    '& a': {
+                      color: 'text.secondary',
+                      textDecoration: 'none',
+                      transition: 'color 0.2s',
+                      '&:hover': {
+                        color: 'primary.main',
+                      }
+                    }
+                  }}
+                >
+                  <li><a href="/services">Services</a></li>
+                  <li><a href="/about">About Us</a></li>
+                  <li><a href="/contact">Contact</a></li>
+                  <li><a href="/blog">Blog</a></li>
+                  <li><a href="/privacy">Privacy Policy</a></li>
+                  <li><a href="/terms">Terms of Service</a></li>
+                </Box>
+              </Box>
+            </Grid>
+            
+            <Grid item xs={12} md={4}>
+              <Typography 
+                variant="h6" 
+                component="h3"
+                sx={{ 
+                  mb: 2,
+                  fontWeight: 600,
+                }}
+              >
+                Contact Us
+              </Typography>
+              <Box 
+                sx={{ 
+                  '& > div': {
+                    display: 'flex',
+                    mb: 2,
+                    alignItems: 'flex-start',
+                    '& svg': {
+                      color: 'primary.main',
+                      mr: 2,
+                      mt: 0.5
+                    }
+                  }
+                }}
+              >
+                <Box>
+                  <LocationIcon fontSize="small" />
+                  <Typography variant="body2" color="text.secondary">
+                    123 Commerce St., Suite 500<br />
+                    San Francisco, CA 94103
+                  </Typography>
+                </Box>
+                
+                <Box>
+                  <PhoneIcon fontSize="small" />
+                  <Typography variant="body2" color="text.secondary">
+                    +1 (555) 123-4567
+                  </Typography>
+                </Box>
+                
+                <Box>
+                  <EmailIcon fontSize="small" />
+                  <Typography variant="body2" color="text.secondary">
+                    info@alphasoft.com
+                  </Typography>
+                </Box>
+              </Box>
+            </Grid>
+          </Grid>
+          
+          <Box 
+            sx={{ 
+              mt: 4, 
+              pt: 3,
+              borderTop: '1px solid',
+              borderColor: 'divider',
+              textAlign: 'center'
+            }}
+          >
+            <Typography variant="body2" color="text.secondary">
+              © {new Date().getFullYear()} Alpha Soft. All rights reserved.
+            </Typography>
+          </Box>
+        </Container>
+      </Box>
+    </Box>
   );
 };
 
