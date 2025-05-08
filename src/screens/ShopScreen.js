@@ -145,12 +145,12 @@ const ShopScreen = () => {
                 {seller?.shop_description}
               </Typography>
               
-              {seller?.social && (
+              {seller?.id && (
                 <MessageButton
                   variant="contained"
                   color="primary"
                   startIcon={<ChatIcon />}
-                  onClick={() => window.open(seller.social, '_blank')}
+                  onClick={() => navigate(`/message/${seller.id}`)}
                 >
                   Send Message
                 </MessageButton>

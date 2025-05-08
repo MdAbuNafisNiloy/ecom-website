@@ -86,9 +86,14 @@ const OrderDetailsScreen = () => {
         orderData.products_id.map(async (productItem) => {
           try {
             const product = await pb.collection('products').getOne(productItem.id);
+            
+            // Get variant information for this product from the variants field
+            const variantInfo = orderData.variants ? orderData.variants[product.id] : null;
+
             return {
               ...product,
-              quantity: productItem.quantity
+              quantity: productItem.quantity,
+              variant: variantInfo
             };
           } catch (error) {
             console.warn(`Product with ID ${productItem.id} not found:`, error);
@@ -420,6 +425,26 @@ const OrderDetailsScreen = () => {
                   <ProductTitle>{product.title}</ProductTitle>
                   <ProductPrice>৳{product.price.toFixed(2)}</ProductPrice>
                   <ProductQuantity>Quantity: {product.quantity}</ProductQuantity>
+                  {product.variant && (
+                    <>
+                      {product.variant.color && (
+                        <ProductVariant>
+                          <VariantColorDot style={{ backgroundColor: product.variant.color.toLowerCase() }} />
+                          Color: {product.variant.color}
+                        </ProductVariant>
+                      )}
+                      {product.variant.size && (
+                        <ProductVariant>
+                          Size: {product.variant.size}
+                        </ProductVariant>
+                      )}
+                      {product.variant.weight && (
+                        <ProductVariant>
+                          Weight: {product.variant.weight}
+                        </ProductVariant>
+                      )}
+                    </>
+                  )}
                 </ProductInfo>
                 <ProductTotal>৳{(product.price * product.quantity).toFixed(2)}</ProductTotal>
               </ProductItem>
@@ -729,56 +754,71 @@ const SectionTitle = styled.h3`
 `;
 
 const ProductItem = styled.div`
-  display: flex;
-  align-items: center;
-  margin-bottom: 10px;
-  cursor: pointer;
-  transition: background-color 0.2s;
-  padding: 5px;
-  border-radius: 5px;
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    padding: 5px;
+    border-radius: 8px;
+    
+    &:hover {
+      background-color: #f5f5f5;
+    }
+  `;
 
-  &:hover {
-    background-color: #f5f5f5;
-  }
+  const ProductImage = styled.img`
+    width: 60px;
+    height: 60px;
+    border-radius: 8px;
+    object-fit: cover;
+    margin-right: 15px;
+  `;
 
-  &.bottom-border {
-    border-bottom: 1px solid #f0f0f0;
-    padding-bottom: 10px;
-  }
-`;
+  const ProductInfo = styled.div`
+    flex: 1;
+    min-width: 0;
+  `;
 
-const ProductImage = styled.img`
-  width: 60px;
-  height: 60px;
-  border-radius: 8px;
-  margin-right: 10px;
-  background-color: #f0f0f0;
-  object-fit: cover;
-`;
+  const ProductTitle = styled.h3`
+    font-size: 14px;
+    font-weight: bold;
+    color: #333;
+    margin: 0 0 4px 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  `;
 
-const ProductInfo = styled.div`
-  flex: 1;
-`;
+  const ProductPrice = styled.p`
+    font-size: 14px;
+    color: #007bff;
+    font-weight: bold;
+    margin: 0 0 4px 0;
+  `;
 
-const ProductTitle = styled.h4`
-  font-size: 14px;
-  font-weight: 500;
-  color: #333;
-  margin: 0 0 4px 0;
-`;
+  const ProductQuantity = styled.p`
+    font-size: 12px;
+    color: #777;
+    margin: 0 0 4px 0;
+  `;
 
-const ProductPrice = styled.p`
-  font-size: 14px;
-  color: #007bff;
-  font-weight: bold;
-  margin: 0 0 4px 0;
-`;
+  const ProductVariant = styled.p`
+    font-size: 12px;
+    color: #777;
+    margin: 0;
+    display: flex;
+    align-items: center;
+  `;
 
-const ProductQuantity = styled.p`
-  font-size: 12px;
-  color: #777;
-  margin: 0;
-`;
+  const VariantColorDot = styled.span`
+    display: inline-block;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    margin-right: 4px;
+    border: 1px solid #ddd;
+  `;
 
 const ProductTotal = styled.p`
   font-size: 14px;

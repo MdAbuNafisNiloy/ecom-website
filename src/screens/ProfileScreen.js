@@ -36,7 +36,8 @@ import {
   Close as CloseIcon,
   BusinessOutlined as BusinessIcon,
   Visibility as VisibilityIcon,
-  VisibilityOff as VisibilityOffIcon
+  VisibilityOff as VisibilityOffIcon,
+  HeadsetMic as HeadsetIcon
 } from '@mui/icons-material';
 import { useCart } from '../contexts/CartContext';
 import pb from '../pocketbase';
@@ -604,6 +605,16 @@ const ProfileScreen = () => {
                 </MenuIconContainer>
                 <Typography variant="body1" sx={{ flex: 1, color: '#32325d', fontWeight: 500 }}>
                   Help Center
+                </Typography>
+                <ChevronForwardIcon sx={{ color: '#8898aa' }} />
+              </MenuItem>
+              
+              <MenuItem onClick={() => navigate('/support')}>
+                <MenuIconContainer sx={{ bgcolor: 'rgba(45, 206, 137, 0.1)' }}>
+                  <HeadsetIcon sx={{ color: '#2dce89' }} />
+                </MenuIconContainer>
+                <Typography variant="body1" sx={{ flex: 1, color: '#32325d', fontWeight: 500 }}>
+                  Support Chat
                 </Typography>
                 <ChevronForwardIcon sx={{ color: '#8898aa' }} />
               </MenuItem>

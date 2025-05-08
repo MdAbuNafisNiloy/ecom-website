@@ -26,13 +26,16 @@ import {
   faLink,
   faDownload,
   faStore,
-  faMessage
+  faMessage,
+  faHeadset
 } from '@fortawesome/free-solid-svg-icons';
 import CategoriesScreen from './screens/CategoriesScreen';
 import ProductsScreen from './screens/ProductsScreen';
 import ProductDetailScreen from './screens/ProductDetailScreen';
+import MessageScreen from './screens/MessageScreen';
+import SupportChatScreen from './screens/SupportChatScreen';
 import { CartProvider, useCart } from './contexts/CartContext';
-import { UserProvider } from './contexts/UserContext';
+import { UserProvider, useUser } from './contexts/UserContext';
 import LoginScreen from './screens/LoginScreen';
 import SignupScreen from './screens/SignupScreen';
 import CartScreen from './screens/CartScreen';
@@ -48,6 +51,7 @@ import pb from './pocketbase';
 import { ToastContainer, toast } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 import './App.css';
+import ChatsScreen from './screens/ChatsScreen';
 
 // Dynamic Policy Page Component
 const DynamicPolicyPage = () => {
@@ -393,12 +397,21 @@ const CustomDrawerContent = ({ isOpen, closeDrawer }) => {
               <div className="drawer-section-title">Support</div>
               <div
                 className="drawer-item"
+                onClick={() => handleNavigation('/support')}
+              >
+                <div className="drawer-item-icon">
+                  <FontAwesomeIcon icon={faHeadset} />
+                </div>
+                <span className="drawer-item-text">Customer Support</span>
+              </div>
+              <div
+                className="drawer-item"
                 onClick={() => window.open(supportUrl, '_blank')}
               >
                 <div className="drawer-item-icon">
                   <FontAwesomeIcon icon={faMessage} />
                 </div>
-                <span className="drawer-item-text">Help & Support</span>
+                <span className="drawer-item-text">Messenger Support</span>
               </div>
             </div>
           </>
@@ -587,7 +600,74 @@ const CustomHeader = ({ title, showBackButton = false, hideSearchIcon = false })
 const TabBar = ({ activeTab }) => {
   const navigate = useNavigate();
   const { cart } = useCart();
+  const { user } = useUser();
+  const [unreadCount, setUnreadCount] = useState(0);
   const cartItemCount = Object.values(cart).reduce((total, item) => total + (item.quantity || 0), 0);
+  
+  // Fetch unread message count
+  useEffect(() => {
+    let isMounted = true;
+    
+    // Simple function to fetch unread messages
+    const fetchUnreadMessages = async () => {
+      if (!user || !user.id) return;
+      
+      try {
+        const filter = `user = "${user.id}" && sender = "seller" && read_status = false`;
+        console.log('fetchUnreadMessages: Using filter:', filter);
+
+        // Use a unique cancel key for this specific fetch operation
+        const cancelKey = 'fetch-unread-count-' + user.id;
+        
+        // Debug: Print PocketBase base URL and API endpoint
+        console.log('PB Base URL:', pb.baseUrl);
+        console.log('API Endpoint:', `${pb.baseUrl}/api/collections/seller_chat/records`);
+        
+        // Using getFullList to count records by fetching them
+        // This is the most reliable way to get an accurate count
+        const records = await pb.collection('seller_chat').getFullList({
+          filter: filter,
+          requestKey: cancelKey
+        });
+
+        console.log('fetchUnreadMessages: Raw Records from PocketBase:', records);
+        console.log('fetchUnreadMessages: Record count:', records.length);
+        
+        // Update state if component is still mounted
+        if (isMounted) {
+          setUnreadCount(records.length);
+        }
+      } catch (err) {
+        console.error('Error fetching unread messages:', err);
+      }
+    };
+    
+    // Initial fetch
+    fetchUnreadMessages();
+    
+    // Set up interval to check periodically
+    const intervalId = setInterval(fetchUnreadMessages, 30000);
+    
+    // Set up real-time subscription for messages
+    let unsubscribe = () => {};
+    
+    if (user && user.id) {
+      pb.collection('seller_chat').subscribe('*', function(e) {
+        if (e.record && e.record.user === user.id) {
+          fetchUnreadMessages();
+        }
+      }).then(function(subscription) {
+        unsubscribe = subscription;
+      });
+    }
+    
+    // Clean up
+    return () => {
+      isMounted = false;
+      clearInterval(intervalId);
+      unsubscribe();
+    };
+  }, [user]);
   
   return (
     <nav className="tab-bar">
@@ -613,6 +693,43 @@ const TabBar = ({ activeTab }) => {
           <FontAwesomeIcon icon={faTh} />
         </div>
         <span className="tab-label">Categories</span>
+      </div>
+      
+      <div 
+        className={`tab-item ${activeTab === 'chats' ? 'active' : ''}`}
+        onClick={() => navigate('/chats')}
+        aria-label="Messages"
+        role="button"
+      >
+        <div className="tab-icon-container" style={{ position: 'relative' }}>
+          <FontAwesomeIcon icon={faMessage} />
+          {unreadCount > 0 && (
+            <div
+              style={{
+                position: 'absolute',
+                top: '-8px',
+                right: '-8px',
+                backgroundColor: '#ff0000',
+                color: 'white',
+                fontSize: '0.7rem',
+                minWidth: '18px',
+                height: '18px',
+                borderRadius: '10px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                fontWeight: 'bold',
+                padding: '0 4px',
+                border: '1px solid white',
+                boxShadow: '0 2px 4px rgba(0, 0, 0, 0.3)',
+                zIndex: 10
+              }}
+            >
+              {unreadCount}
+            </div>
+          )}
+        </div>
+        <span className="tab-label">Messages</span>
       </div>
       
       <div 
@@ -660,6 +777,19 @@ const MainLayout = ({ children, title, showBackButton, activeTab, hideSearchIcon
         </div>
       </main>
       <TabBar activeTab={activeTab} />
+    </div>
+  );
+};
+
+// MessageLayout component without header and tab bar
+const MessageLayout = ({ children }) => {
+  return (
+    <div className="app-container message-layout">
+      <main className="main-content" style={{ height: '100vh', paddingTop: 0, paddingBottom: 0 }}>
+        <div className="content-container" style={{ height: '100%' }}>
+          {children}
+        </div>
+      </main>
     </div>
   );
 };
@@ -775,6 +905,34 @@ const App = () => {
                 <MainLayout title="Page" showBackButton={true}>
                   <DynamicPolicyPage />
                 </MainLayout>
+              } />
+
+              {/* Message route */}
+              <Route path="/message" element={
+                <MessageLayout>
+                  <MessageScreen />
+                </MessageLayout>
+              } />
+
+              {/* Message route with seller ID parameter */}
+              <Route path="/message/:id" element={
+                <MessageLayout>
+                  <MessageScreen />
+                </MessageLayout>
+              } />
+
+              {/* Chats route */}
+              <Route path="/chats" element={
+                <MainLayout title="Chats" showBackButton={true}>
+                  <ChatsScreen />
+                </MainLayout>
+              } />
+
+              {/* Support Chat route - both anonymous and logged-in users can access */}
+              <Route path="/support" element={
+                <MessageLayout>
+                  <SupportChatScreen />
+                </MessageLayout>
               } />
             </Routes>
             <ToastContainer 

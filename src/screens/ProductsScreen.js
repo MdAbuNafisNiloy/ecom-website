@@ -31,7 +31,11 @@ import {
   Refresh as RefreshIcon,
   Error as ErrorIcon,
   Info as InfoIcon,
-  ArrowForward as ArrowForwardIcon
+  ArrowForward as ArrowForwardIcon,
+  FlashOn as FlashOnIcon,
+  Recommend as RecommendIcon,
+  VolumeUp as VolumeUpIcon,
+  NotificationImportant
 } from '@mui/icons-material';
 import { Carousel } from 'react-responsive-carousel';
 import 'react-responsive-carousel/lib/styles/carousel.min.css';
@@ -39,6 +43,7 @@ import pb from '../pocketbase';
 import { useCart } from '../contexts/CartContext';
 import { useSnackbar } from 'notistack';
 import { useUser } from '../contexts/UserContext';
+import { NotificationFilled } from '@ant-design/icons';
 
 const ProductsScreen = () => {
   const navigate = useNavigate();
@@ -67,6 +72,8 @@ const ProductsScreen = () => {
   const [wishlistItems, setWishlistItems] = useState([]);
   const [refreshing, setRefreshing] = useState(false);
   const [imageLoadErrors, setImageLoadErrors] = useState({});
+  const [scrollingText, setScrollingText] = useState('');
+  const [scrollingTextLoading, setScrollingTextLoading] = useState(true);
 
   // Ref for intersection observer
   const observerRef = useRef(null);
@@ -197,6 +204,23 @@ const ProductsScreen = () => {
     }
   }, [fetchUserWishlist]);
 
+  // Fetch scrolling text
+  const fetchScrollingText = useCallback(async () => {
+    try {
+      setScrollingTextLoading(true);
+      const scrollingTextRecords = await pb.collection('scrolling_text').getFullList({
+        sort: 'created',
+      });
+      if (scrollingTextRecords.length > 0) {
+        setScrollingText(scrollingTextRecords[0].text);
+      }
+    } catch (error) {
+      console.error('Error fetching scrolling text:', error);
+    } finally {
+      setScrollingTextLoading(false);
+    }
+  }, []);
+
   // Initial data fetch
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -206,11 +230,12 @@ const ProductsScreen = () => {
     await Promise.all([
       fetchBanners(),
       fetchCategories(),
-      fetchAllProducts(1, true)
+      fetchAllProducts(1, true),
+      fetchScrollingText()
     ]);
     
     setLoading(false);
-  }, [fetchBanners, fetchCategories, fetchAllProducts]);
+  }, [fetchBanners, fetchCategories, fetchAllProducts, fetchScrollingText]);
 
   // Handle refresh
   const handleRefresh = async () => {
@@ -398,6 +423,26 @@ const ProductsScreen = () => {
       .slice(0, 8); // Limit to top 8
   }, [allProducts]);
 
+  // Get flash sale products from the main product array
+  const getFlashSaleProducts = useCallback(() => {
+    if (!allProducts.length) return [];
+    
+    // Filter for products with flash_sale flag
+    return [...allProducts]
+      .filter(product => product.featured)
+      .slice(0, 8); // Limit to top 8
+  }, [allProducts]);
+
+  // Get random products for "For You" section
+  const getForYouProducts = useCallback(() => {
+    if (!allProducts.length) return [];
+    
+    // Shuffle and pick random products
+    return [...allProducts]
+      .sort(() => 0.5 - Math.random())
+      .slice(0, 8); // Limit to top 8
+  }, [allProducts]);
+
   // Product card component for reuse
   const ProductCard = ({ product }) => {
     const {
@@ -479,7 +524,7 @@ const ProductsScreen = () => {
             }}
           />
           
-          {/* Badges Container - for multiple badges */}
+          {/* Badges Container - for top left badges */}
           <Box sx={{ position: 'absolute', top: 8, left: 8, display: 'flex', flexDirection: 'column', gap: 1 }}>
             {/* Discount badge */}
             {hasDiscount && (
@@ -493,20 +538,23 @@ const ProductsScreen = () => {
                 }}
               />
             )}
-            
-            {/* Free delivery badge */}
-            {isFreeDelivery && (
+          </Box>
+          
+          {/* Free delivery badge - positioned at the bottom */}
+          {isFreeDelivery && (
+            <Box sx={{ position: 'absolute', bottom: 8, left: 10,  display: 'flex', justifyContent: 'center' }}>
               <Chip
                 label="Free Delivery"
                 color="success"
                 size="small"
                 sx={{ 
                   fontWeight: 'bold',
-                  fontSize: '0.7rem'
+                  fontSize: '0.7rem',
+                  boxShadow: '0 2px 4px rgba(0,0,0,0.2)'
                 }}
               />
-            )}
-          </Box>
+            </Box>
+          )}
           
           {/* Out of stock overlay */}
           {isOutOfStock && (
@@ -701,6 +749,14 @@ const ProductsScreen = () => {
   const trendingProducts = getTrendingProducts();
   const trendingLoading = productsLoading;
 
+  // Get flash sale products for display
+  const flashSaleProducts = getFlashSaleProducts();
+  const flashSaleLoading = productsLoading;
+
+  // Get "For You" products for display
+  const forYouProducts = getForYouProducts();
+  const forYouLoading = productsLoading;
+
   return (
     <Container maxWidth="xl" disableGutters sx={{ overflowX: 'hidden' }}>
       {/* Refresh button for mobile */}
@@ -763,6 +819,54 @@ const ProductsScreen = () => {
               Retry
             </Button>
           </Paper>
+        )}
+
+        {/* Scrolling Text */}
+        {!scrollingTextLoading && scrollingText && (
+          <Box sx={{ 
+            mb: 2, 
+            py: 1.2, 
+            backgroundColor: theme.palette.primary.main, 
+            color: 'white', 
+            borderRadius: 2, 
+            display: 'flex', 
+            alignItems: 'center',
+            overflow: 'hidden',
+            position: 'relative'
+          }}>
+            <Box sx={{ 
+              display: 'flex', 
+              alignItems: 'center', 
+              position: 'absolute',
+              paddingLeft: '16px',
+              zIndex: 2,
+              backgroundColor: theme.palette.primary.main,
+              pr: 1,
+             
+            }}>
+              <NotificationFilled sx={{ 
+                color: 'white', 
+                fontSize: { xs: 20, sm: 24 }, 
+                mr: 1 
+              }} />
+            </Box>
+            <Box sx={{ 
+              width: '100%',
+              overflow: 'hidden',
+              pl: 5
+            }}>
+              <Typography 
+                variant="body2" 
+                className="scrolling-text"
+                sx={{ 
+                  fontWeight: 500,
+                  display: 'inline-block'
+                }}
+              >
+                {scrollingText}
+              </Typography>
+            </Box>
+          </Box>
         )}
 
         {/* Banner Carousel */}
@@ -974,6 +1078,128 @@ const ProductsScreen = () => {
             </Box>
           ) : null}
         </Box>
+        
+        {/* Flash Sale Products Section */}
+        {(flashSaleLoading || flashSaleProducts.length > 0) && (
+          <Box sx={{ mb: 4 }}>
+            <Box sx={{ 
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              mb: 2
+            }}>
+              <Typography 
+                variant="h6" 
+                sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center',
+                  fontWeight: 600,
+                  color: 'text.primary'
+                }}
+              >
+                <FlashOnIcon sx={{ mr: 1, color: 'primary.main' }} /> 
+                Flash Sale
+              </Typography>
+            </Box>
+            
+            {flashSaleLoading ? (
+              <Box sx={{ 
+                display: 'flex',
+                gap: 2,
+                overflowX: 'auto',
+                py: 1,
+                pb: 1.5,
+                '&::-webkit-scrollbar': { height: 6 },
+                '&::-webkit-scrollbar-track': { bgcolor: 'background.paper' },
+                '&::-webkit-scrollbar-thumb': { bgcolor: 'primary.light', borderRadius: 3 }
+              }}>
+                {Array(4).fill(0).map((_, index) => (
+                  <Box key={index} sx={{ minWidth: 220, maxWidth: 280 }}>
+                    <ProductSkeleton />
+                  </Box>
+                ))}
+              </Box>
+            ) : flashSaleProducts.length > 0 ? (
+              <Box sx={{ 
+                display: 'flex',
+                gap: 2,
+                overflowX: 'auto',
+                py: 1,
+                pb: 1.5,
+                '&::-webkit-scrollbar': { height: 6 },
+                '&::-webkit-scrollbar-track': { bgcolor: 'background.paper' },
+                '&::-webkit-scrollbar-thumb': { bgcolor: 'primary.light', borderRadius: 3 }
+              }}>
+                {flashSaleProducts.map(product => (
+                  <Box key={product.id} sx={{ minWidth: 220, maxWidth: 280 }}>
+                    <ProductCard product={product} />
+                  </Box>
+                ))}
+              </Box>
+            ) : null}
+          </Box>
+        )}
+        
+        {/* For You Products Section */}
+        {(forYouLoading || forYouProducts.length > 0) && (
+          <Box sx={{ mb: 4 }}>
+            <Box sx={{ 
+              display: 'flex',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              mb: 2
+            }}>
+              <Typography 
+                variant="h6" 
+                sx={{ 
+                  display: 'flex', 
+                  alignItems: 'center',
+                  fontWeight: 600,
+                  color: 'text.primary'
+                }}
+              >
+                <RecommendIcon sx={{ mr: 1, color: 'primary.main' }} /> 
+                For You
+              </Typography>
+            </Box>
+            
+            {forYouLoading ? (
+              <Box sx={{ 
+                display: 'flex',
+                gap: 2,
+                overflowX: 'auto',
+                py: 1,
+                pb: 1.5,
+                '&::-webkit-scrollbar': { height: 6 },
+                '&::-webkit-scrollbar-track': { bgcolor: 'background.paper' },
+                '&::-webkit-scrollbar-thumb': { bgcolor: 'primary.light', borderRadius: 3 }
+              }}>
+                {Array(4).fill(0).map((_, index) => (
+                  <Box key={index} sx={{ minWidth: 220, maxWidth: 280 }}>
+                    <ProductSkeleton />
+                  </Box>
+                ))}
+              </Box>
+            ) : forYouProducts.length > 0 ? (
+              <Box sx={{ 
+                display: 'flex',
+                gap: 2,
+                overflowX: 'auto',
+                py: 1,
+                pb: 1.5,
+                '&::-webkit-scrollbar': { height: 6 },
+                '&::-webkit-scrollbar-track': { bgcolor: 'background.paper' },
+                '&::-webkit-scrollbar-thumb': { bgcolor: 'primary.light', borderRadius: 3 }
+              }}>
+                {forYouProducts.map(product => (
+                  <Box key={product.id} sx={{ minWidth: 220, maxWidth: 280 }}>
+                    <ProductCard product={product} />
+                  </Box>
+                ))}
+              </Box>
+            ) : null}
+          </Box>
+        )}
         
         {/* Trending Products Section - Using filtered data from the main products array */}
         {(trendingLoading || trendingProducts.length > 0) && (

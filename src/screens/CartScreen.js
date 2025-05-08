@@ -221,9 +221,13 @@ const CartScreen = () => {
       }
 
       const cartData = userData.cart;
-      const cartItemsArray = Object.entries(cartData).map(([id, item]) => ({
-        id,
-        ...item
+      const cartItemsArray = Object.entries(cartData).map(([cartKey, item]) => ({
+        cartKey,
+        ...item,
+        id: item.id,
+        quantity: item.quantity,
+        price: item.price,
+        selectedVariant: item.selectedVariant
       }));
 
       // Process all product requests in parallel
@@ -240,8 +244,10 @@ const CartScreen = () => {
 
           return {
             ...product,
+            cartKey: item.cartKey,
             quantity: item.quantity,
             price: item.price,
+            selectedVariant: item.selectedVariant,
             delivery_charge: product.delivery_charge || 0,
             sellerName: product.expand?.seller?.shop_name || 'Unknown Seller'
           };
@@ -315,12 +321,26 @@ const CartScreen = () => {
     try {
       if (!user?.id) return;
       
-      // Convert cart items array to object format expected by backend
+      // Convert cart items to object format with product ID + variant as keys
       const cartObject = updatedCartItems.reduce((acc, item) => {
-        acc[item.id] = {
+        // Generate a unique key for each product+variant combination
+        let cartKey = item.id;
+        if (item.selectedVariant) {
+          const variantInfo = [];
+          if (item.selectedVariant.color) variantInfo.push(item.selectedVariant.color);
+          if (item.selectedVariant.size) variantInfo.push(item.selectedVariant.size);
+          if (item.selectedVariant.weight) variantInfo.push(item.selectedVariant.weight);
+          
+          if (variantInfo.length > 0) {
+            cartKey = `${item.id}-${variantInfo.join('-')}`;
+          }
+        }
+        
+        acc[cartKey] = {
           id: item.id,
           quantity: item.quantity,
-          price: item.price
+          price: item.price,
+          selectedVariant: item.selectedVariant || null
         };
         return acc;
       }, {});
@@ -370,8 +390,28 @@ const CartScreen = () => {
     return cartItems.reduce((total, item) => total + (item.price * item.quantity), 0);
   };
 
+  // Get the total delivery charge - updated to only count the highest charge per seller
   const getTotalDeliveryCharge = () => {
-    return cartItems.reduce((total, item) => total + (item.delivery_charge * item.quantity), 0);
+    // Group items by seller
+    const sellerGroups = {};
+    
+    cartItems.forEach(item => {
+      if (!sellerGroups[item.seller]) {
+        sellerGroups[item.seller] = [];
+      }
+      sellerGroups[item.seller].push(item);
+    });
+    
+    // For each seller, only take the highest delivery charge
+    let totalDeliveryCharge = 0;
+    
+    Object.values(sellerGroups).forEach(sellerItems => {
+      // Find the highest delivery charge for this seller
+      const highestCharge = Math.max(...sellerItems.map(item => item.delivery_charge));
+      totalDeliveryCharge += highestCharge;
+    });
+    
+    return totalDeliveryCharge;
   };
 
   const getTotalPrice = () => {
@@ -493,7 +533,7 @@ const CartScreen = () => {
         try {
           const sellerItems = sellerGroup.items;
           const sellerSubtotal = sellerItems.reduce((total, item) => total + (item.price * item.quantity), 0);
-          const sellerDeliveryCharge = sellerItems.reduce((total, item) => total + (item.delivery_charge * item.quantity), 0);
+          const sellerDeliveryCharge = Math.max(...sellerItems.map(item => item.delivery_charge || 0));
           const sellerCommission = calculateCommission(sellerSubtotal);
           
           const isPaymentComplete = paymentMethod !== 'Cash on Delivery';
@@ -501,13 +541,29 @@ const CartScreen = () => {
           // Get seller data
           const seller = await pb.collection('sellers').getOne(sellerGroup.sellerId);
           
+          // Create enhanced products data for the order with variant information
+          const productsWithVariants = sellerItems.map(item => ({
+            id: item.id,
+            quantity: item.quantity,
+            price: item.price
+          }));
+          
+          // Create a separate variants object with product IDs as keys
+          const variantsObject = {};
+          sellerItems.forEach(item => {
+            if (item.selectedVariant) {
+              variantsObject[item.id] = item.selectedVariant;
+            }
+          });
+
           const orderData = {
             user_id: user.id,
             seller_id: sellerGroup.sellerId,
             product_price: sellerSubtotal,
             delivery_charge: sellerDeliveryCharge,
             products: sellerItems.map(item => item.id),
-            products_id: sellerItems.map(item => ({ id: item.id, quantity: item.quantity })),
+            products_id: productsWithVariants,
+            variants: variantsObject, // Add variants as a separate field
             commission: sellerCommission,
             payment_status: isPaymentComplete ? 'pending' : 'pending',
             order_status: 'hold',
@@ -535,34 +591,30 @@ const CartScreen = () => {
           // Link invoice to order
           await pb.collection('orders').update(order.id, { invoice: invoice.id });
           
-          // Update seller statistics in background
-          updateSellerStatistics(seller, order, isPaymentComplete);
+          // Update seller statistics
+          await updateSellerStatistics(seller, order, isPaymentComplete);
           
-          // Send email notifications in background
-          sendOrderNotificationEmails(order, seller, sellerItems, isPaymentComplete);
+          // Send email notifications
+          await sendOrderNotificationEmails(order, seller, sellerItems, isPaymentComplete);
           
           createdOrders.push(order);
         } catch (error) {
           console.error(`Error processing order for seller ${sellerGroup.sellerId}:`, error);
           showSnackbar(`Failed to process order for ${sellerGroup.sellerName}. Please try again.`, 'error');
-          // Continue with other seller orders
         }
       }
 
-      // If at least one order was created successfully, clear the cart
+      // If at least one order was created successfully, clear the cart and redirect
       if (createdOrders.length > 0) {
-        // Clear cart
         await pb.collection('users').update(user.id, { cart: {} });
         updateCart({});
         setCartItems([]);
         
-        // Reset checkout flow
         setPaymentMethod('');
         setTransactionId('');
         setPaymentNumber('');
         setCheckoutStep('cart');
 
-        // Show success message and navigate to orders page
         showSnackbar(`Your order total of ৳${getTotalPrice().toFixed(2)} has been placed successfully!`);
         navigate('/my-orders');
       } else {
@@ -607,6 +659,55 @@ const CartScreen = () => {
               <Typography variant="body2" color="text.secondary" sx={{ mb: 0.5 }}>
                 Seller: {item.sellerName}
               </Typography>
+              
+              {/* Display variant information */}
+              {item.selectedVariant && (
+                <Box sx={{ mb: 1 }}>
+                  {item.selectedVariant.color && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>
+                        Color:
+                      </Typography>
+                      <Box sx={{ display: 'flex', alignItems: 'center' }}>
+                        <Box 
+                          sx={{ 
+                            width: 16, 
+                            height: 16, 
+                            borderRadius: '50%', 
+                            backgroundColor: item.selectedVariant.color.toLowerCase(),
+                            border: '1px solid #ddd',
+                            mr: 0.5
+                          }} 
+                        />
+                        <Typography variant="body2">
+                          {item.selectedVariant.color}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  )}
+                  {item.selectedVariant.size && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>
+                        Size:
+                      </Typography>
+                      <Typography variant="body2">
+                        {item.selectedVariant.size}
+                      </Typography>
+                    </Box>
+                  )}
+                  {item.selectedVariant.weight && (
+                    <Box sx={{ display: 'flex', alignItems: 'center', mb: 0.5 }}>
+                      <Typography variant="body2" color="text.secondary" sx={{ mr: 1 }}>
+                        Weight:
+                      </Typography>
+                      <Typography variant="body2">
+                        {item.selectedVariant.weight}
+                      </Typography>
+                    </Box>
+                  )}
+                </Box>
+              )}
+
               {item.delivery_charge > 0 ? (
                 <Typography variant="body2" color="text.secondary">
                   Delivery: ৳{item.delivery_charge.toFixed(2)}
@@ -636,7 +737,7 @@ const CartScreen = () => {
             <QuantityControl>
               <IconButton 
                 size="small"
-                onClick={() => updateQuantity(item.id, item.quantity - 1)}
+                onClick={() => updateQuantity(item.cartKey, item.quantity - 1)}
                 disabled={item.quantity <= 1}
               >
                 <Remove fontSize="small" />
@@ -646,7 +747,11 @@ const CartScreen = () => {
               </Typography>
               <IconButton 
                 size="small"
-                onClick={() => updateQuantity(item.id, item.quantity + 1)}
+                onClick={() => updateQuantity(item.cartKey, item.quantity + 1)}
+                disabled={item.selectedVariant ? 
+                  item.quantity >= item.selectedVariant.stock : 
+                  item.quantity >= item.stock
+                }
               >
                 <Add fontSize="small" />
               </IconButton>
@@ -656,7 +761,7 @@ const CartScreen = () => {
               variant="outlined"
               color="error"
               startIcon={<Delete />}
-              onClick={() => removeFromCart(item.id)}
+              onClick={() => removeFromCart(item.cartKey)}
               size="small"
             >
               Remove

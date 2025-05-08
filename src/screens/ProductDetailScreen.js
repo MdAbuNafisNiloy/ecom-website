@@ -92,6 +92,16 @@ const ProductDetailScreen = () => {
   const carouselRef = useRef(null);
   const youtubeRef = useRef(null);
 
+  // Product variants state
+  const [productVariants, setProductVariants] = useState([]);
+  const [selectedVariant, setSelectedVariant] = useState(null);
+  const [selectedColor, setSelectedColor] = useState('');
+  const [selectedSize, setSelectedSize] = useState('');
+  const [selectedWeight, setSelectedWeight] = useState('');
+  const [availableColors, setAvailableColors] = useState([]);
+  const [availableSizes, setAvailableSizes] = useState([]);
+  const [availableWeights, setAvailableWeights] = useState([]);
+
   // Fetch product details if not provided in location state
   useEffect(() => {
     const fetchProductDetails = async () => {
@@ -219,16 +229,67 @@ const ProductDetailScreen = () => {
       return;
     }
 
+    // Validate that variants are selected if available
+    if (productVariants.length > 0) {
+      const hasRequiredOptions = {
+        color: availableColors.length > 0,
+        size: availableSizes.length > 0,
+        weight: availableWeights.length > 0 && availableWeights[0] !== ""
+      };
+      
+      const missingSelections = [];
+      if (hasRequiredOptions.color && !selectedColor) missingSelections.push('Color');
+      if (hasRequiredOptions.size && !selectedSize) missingSelections.push('Size');
+      if (hasRequiredOptions.weight && !selectedWeight) missingSelections.push('Weight');
+      
+      if (missingSelections.length > 0) {
+        alert(`Please select: ${missingSelections.join(', ')}`);
+        return;
+      }
+      
+      if (!selectedVariant) {
+        alert('Selected combination is not available');
+        return;
+      }
+    }
+
     try {
       setCartLoading(true);
 
       const user = await pb.collection('users').getOne(userId);
       const cart = user.cart || {};
 
-      if (cart[productData.id]) {
-        cart[productData.id].quantity += quantity;
+      // Create a unique key for the product with variant
+      const cartKey = selectedVariant ? 
+        `${productData.id}_${selectedVariant.id}` : 
+        productData.id;
+
+      if (cart[cartKey]) {
+        cart[cartKey].quantity += quantity;
       } else {
-        cart[productData.id] = { ...productData, quantity };
+        const productToAdd = {
+          id: productData.id,
+          title: productData.title,
+          price: productData.price,
+          images: productData.images,
+          seller: productData.shop,
+          quantity: quantity,
+          delivery_charge: productData.delivery_charge || 0,
+          collectionId: productData.collectionId
+        };
+
+        // Add variant information if available
+        if (selectedVariant) {
+          productToAdd.selectedVariant = {
+            id: selectedVariant.id,
+            color: selectedVariant.color,
+            size: selectedVariant.size,
+            weight: selectedVariant.weight,
+            stock: selectedVariant.stock
+          };
+        }
+
+        cart[cartKey] = productToAdd;
       }
 
       await pb.collection('users').update(userId, { cart });
@@ -249,45 +310,18 @@ const ProductDetailScreen = () => {
   
   // Calculate discount percentage
   const calculateDiscount = () => {
-    if (productData?.compare_price && productData?.price) {
+    if (productData?.compare_price && productData.price) {
       const discount = ((productData.compare_price - productData.price) / productData.compare_price) * 100;
       return Math.round(discount);
     }
     return 0;
   };
-  
-  // Increase quantity
-  const increaseQuantity = () => {
-    if (productData && quantity < productData.stock) {
-      setQuantity(quantity + 1);
-    }
-  };
-  
-  // Decrease quantity
-  const decreaseQuantity = () => {
-    if (quantity > 1) {
-      setQuantity(quantity - 1);
-    }
-  };
 
-  // Handle opening image in modal
-  const openImageModal = (index) => {
-    setModalImageIndex(index);
-    setModalVisible(true);
-  };
-
-  // Handle sending message to seller
-  const handleMessageSeller = () => {
-    if (sellerMessage.trim() === '') return;
-    
-    // Here you would implement the actual message sending functionality
-    alert(`Message sent to ${shopInfo?.name || 'seller'}: ${sellerMessage}`);
-    setSellerMessage('');
-  };
-
-  // Image zoom functions
+  // Handle mouse events for image zoom
   const handleMouseEnter = () => {
-    setShowZoom(true);
+    if (!isMobile) {
+      setShowZoom(true);
+    }
   };
 
   const handleMouseLeave = () => {
@@ -295,9 +329,8 @@ const ProductDetailScreen = () => {
   };
 
   const handleMouseMove = (e) => {
-    if (!imageContainerRef.current) return;
+    if (!imageContainerRef.current || isMobile) return;
     
-    // Get container dimensions and position
     const container = imageContainerRef.current;
     const rect = container.getBoundingClientRect();
     
@@ -569,6 +602,131 @@ const ProductDetailScreen = () => {
     }
   };
 
+  // Parse and process product variants
+  useEffect(() => {
+    const parseVariants = () => {
+      try {
+        // Check if product has variants
+        if (productData?.variants && productData.variants !== "JSON") {
+          // Parse variants if it's a string
+          const variants = typeof productData.variants === 'string' 
+            ? safeJsonParse(productData.variants, []) 
+            : productData.variants;
+          
+          // Set available variants
+          setProductVariants(variants);
+          
+          // Extract unique colors, sizes, and weights
+          const colors = [...new Set(variants.map(v => v.color).filter(Boolean))];
+          const sizes = [...new Set(variants.map(v => v.size).filter(Boolean))];
+          const weights = [...new Set(variants.map(v => v.weight).filter(Boolean))];
+          
+          setAvailableColors(colors);
+          setAvailableSizes(sizes);
+          setAvailableWeights(weights);
+          
+          // Set default selected variant if available
+          if (variants.length > 0) {
+            setSelectedVariant(variants[0]);
+            setSelectedColor(variants[0].color || '');
+            setSelectedSize(variants[0].size || '');
+            setSelectedWeight(variants[0].weight || '');
+          }
+        }
+      } catch (error) {
+        console.error('Error parsing variants:', error);
+      }
+    };
+    
+    parseVariants();
+  }, [productData?.variants]);
+
+  // Update selected variant based on color, size, weight selection
+  useEffect(() => {
+    if (productVariants && productVariants.length > 0) {
+      // Check if the user has made any specific selection
+      const hasActiveSelectionCriteria = selectedColor || selectedSize || selectedWeight;
+
+      if (hasActiveSelectionCriteria) {
+        const matchingVariant = productVariants.find(variant => {
+          // A variant matches if all actively selected criteria match the variant's properties
+          const colorMatch = !selectedColor || (variant.color === selectedColor);
+          const sizeMatch = !selectedSize || (variant.size === selectedSize);
+          const weightMatch = !selectedWeight || (variant.weight === selectedWeight);
+          return colorMatch && sizeMatch && weightMatch;
+        });
+
+        setSelectedVariant(matchingVariant || null);
+      } else {
+        setSelectedVariant(null);
+      }
+    } else {
+      setSelectedVariant(null);
+    }
+  }, [selectedColor, selectedSize, selectedWeight, productVariants]);
+
+  // Update available options based on current selections
+  useEffect(() => {
+    if (productVariants.length > 0) {
+      // If a color is selected, filter available sizes and weights
+      if (selectedColor) {
+        // Find all variants that match the selected color
+        const variantsWithSelectedColor = productVariants.filter(v => v.color === selectedColor);
+        
+        // Get unique sizes from filtered variants
+        const availableSizesForColor = [...new Set(variantsWithSelectedColor.map(v => v.size).filter(Boolean))];
+        setAvailableSizes(availableSizesForColor);
+        
+        // Get unique weights from filtered variants
+        const availableWeightsForColor = [...new Set(variantsWithSelectedColor.map(v => v.weight).filter(Boolean))];
+        setAvailableWeights(availableWeightsForColor);
+        
+        // Reset size and weight if they're no longer available with this color
+        if (selectedSize && !availableSizesForColor.includes(selectedSize)) {
+          setSelectedSize('');
+        }
+        if (selectedWeight && !availableWeightsForColor.includes(selectedWeight)) {
+          setSelectedWeight('');
+        }
+      } else {
+        // If no color selected, show all available options
+        const allSizes = [...new Set(productVariants.map(v => v.size).filter(Boolean))];
+        setAvailableSizes(allSizes);
+        
+        const allWeights = [...new Set(productVariants.map(v => v.weight).filter(Boolean))];
+        setAvailableWeights(allWeights);
+      }
+    }
+  }, [selectedColor, productVariants]);
+
+  // Function to open the image modal
+  const openImageModal = (index) => {
+    setModalImageIndex(index);
+    setModalVisible(true);
+  };
+
+  // Function to decrease the quantity
+  const decreaseQuantity = () => {
+    if (quantity > 1) {
+      setQuantity(quantity - 1);
+    }
+  };
+
+  // Function to increase the quantity
+  const increaseQuantity = () => {
+    if (quantity < getAvailableStock()) {
+      setQuantity(quantity + 1);
+    }
+  };
+
+  // Helper function to get stock based on selected variant or product stock
+  const getAvailableStock = () => {
+    if (selectedVariant && selectedVariant.stock) {
+      return parseInt(selectedVariant.stock, 10);
+    }
+    return productData?.stock || 0;
+  };
+
   if (loading || !productData) {
     return (
       <LoadingContainer>
@@ -707,6 +865,81 @@ const ProductDetailScreen = () => {
             )}
           </PriceContainer>
           
+          {/* Product Variants */}
+          {productVariants.length > 0 && (
+            <Box sx={{ mb: 3 }}>
+              <Typography variant="h6" sx={{ mb: 2 }}>Available Options</Typography>
+              
+              {/* Color Options */}
+              {availableColors.length > 0 && (
+                <VariantGroup>
+                  <VariantLabel>Color:</VariantLabel>
+                  <VariantsContainer>
+                    {availableColors.map((color) => (
+                      <ColorOption
+                        key={color}
+                        selected={selectedColor === color}
+                        onClick={() => setSelectedColor(color)}
+                      >
+                        <ColorSwatch style={{ backgroundColor: color.toLowerCase() }} />
+                        <span>{color}</span>
+                      </ColorOption>
+                    ))}
+                  </VariantsContainer>
+                </VariantGroup>
+              )}
+              
+              {/* Size Options */}
+              {availableSizes.length > 0 && (
+                <VariantGroup>
+                  <VariantLabel>Size:</VariantLabel>
+                  <VariantsContainer>
+                    {availableSizes.map((size) => (
+                      <SizeOption
+                        key={size}
+                        selected={selectedSize === size}
+                        onClick={() => setSelectedSize(size)}
+                      >
+                        {size}
+                      </SizeOption>
+                    ))}
+                  </VariantsContainer>
+                </VariantGroup>
+              )}
+              
+              {/* Weight Options */}
+              {availableWeights.length > 0 && availableWeights[0] !== "" && (
+                <VariantGroup>
+                  <VariantLabel>Weight:</VariantLabel>
+                  <VariantsContainer>
+                    {availableWeights.map((weight) => (
+                      <WeightOption
+                        key={weight}
+                        selected={selectedWeight === weight}
+                        onClick={() => setSelectedWeight(weight)}
+                      >
+                        {weight}
+                      </WeightOption>
+                    ))}
+                  </VariantsContainer>
+                </VariantGroup>
+              )}
+
+              {/* Selected Variant Summary */}
+              {selectedVariant && (
+                <SelectedVariantSummary>
+                  <Typography variant="body1">
+                    Selected: {[
+                      selectedColor && `Color: ${selectedColor}`,
+                      selectedSize && `Size: ${selectedSize}`,
+                      selectedWeight && `Weight: ${selectedWeight}`
+                    ].filter(Boolean).join(', ')}
+                  </Typography>
+                </SelectedVariantSummary>
+              )}
+            </Box>
+          )}
+
           {/* Stock Status */}
           <StockStatusContainer>
             <StockIndicator status={productData.stock > 0} />
@@ -755,14 +988,14 @@ const ProductDetailScreen = () => {
                 </ShopDetails>
               </ShopHeader>
               
-              {shopInfo.social && (
+              {shopInfo && (
                 <MessageButton 
                   variant="outlined" 
                   color="primary"
-                  onClick={() => window.open(shopInfo.social, '_blank')}
+                  onClick={() => navigate(`/message/${shopInfo.id}`)}
                   startIcon={<ChatIcon />}
                 >
-                  Contact
+                  Contact Seller
                 </MessageButton>
               )}
             </ShopInfoContainer>
@@ -1480,6 +1713,81 @@ const FullscreenVideoContainer = styled.div`
   display: flex;
   justify-content: center;
   align-items: center;
+`;
+
+const VariantGroup = styled.div`
+  margin-bottom: 24px;
+`;
+
+const VariantLabel = styled.div`
+  font-weight: bold;
+  margin-bottom: 12px;
+`;
+
+const VariantsContainer = styled.div`
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 16px;
+`;
+
+const ColorOption = styled.button`
+  display: flex;
+  align-items: center;
+  padding: 8px 16px;
+  border: 2px solid ${props => props.selected ? '#1976D2' : '#ddd'};
+  border-radius: 8px;
+  background-color: ${props => props.selected ? '#e3f2fd' : 'white'};
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    border-color: #1976D2;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+`;
+
+const ColorSwatch = styled.div`
+  width: 24px;
+  height: 24px;
+  border-radius: 12px;
+  margin-right: 8px;
+  border: 1px solid #ddd;
+`;
+
+const SizeOption = styled.button`
+  padding: 8px 16px;
+  border: 2px solid ${props => props.selected ? '#1976D2' : '#ddd'};
+  border-radius: 8px;
+  background-color: ${props => props.selected ? '#e3f2fd' : 'white'};
+  cursor: pointer;
+  transition: all 0.2s;
+  min-width: 60px;
+
+  &:hover {
+    border-color: #1976D2;
+  }
+
+  &:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+`;
+
+const WeightOption = styled(SizeOption)`
+  min-width: 80px;
+`;
+
+const SelectedVariantSummary = styled.div`
+  margin-top: 16px;
+  padding: 12px;
+  background-color: #f5f5f5;
+  border-radius: 8px;
+  border: 1px solid #ddd;
 `;
 
 export default ProductDetailScreen;
