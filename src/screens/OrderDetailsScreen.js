@@ -33,7 +33,8 @@ import {
   Clock,
   XCircle,
   HelpCircle,
-  X
+  X,
+  Download
 } from 'lucide-react';
 import { useParams, useNavigate } from 'react-router-dom';
 import pb from '../pocketbase';
@@ -425,6 +426,29 @@ const OrderDetailsScreen = () => {
                   <ProductTitle>{product.title}</ProductTitle>
                   <ProductPrice>৳{product.price.toFixed(2)}</ProductPrice>
                   <ProductQuantity>Quantity: {product.quantity}</ProductQuantity>
+                  
+                  {/* Display digital product badge if applicable */}
+                  {product.digital_product && (
+                    <DigitalProductBadge>
+                      Digital Product
+                    </DigitalProductBadge>
+                  )}
+                  
+                  {/* Display download button if it's a digital product and payment status is paid */}
+                  {product.digital_product && order.payment_status.toLowerCase() === 'paid' && (
+                    <DownloadButton 
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        // Use download_link if available, otherwise use the product file URL
+                        const downloadUrl = product.download_link || pb.files.getURL(product, product.product);
+                        window.open(downloadUrl, '_blank');
+                      }}
+                    >
+                      <Download size={14} />
+                      <span>Download</span>
+                    </DownloadButton>
+                  )}
+                  
                   {product.variant && (
                     <>
                       {product.variant.color && (
@@ -764,6 +788,37 @@ const ProductItem = styled.div`
     
     &:hover {
       background-color: #f5f5f5;
+    }
+  `;
+  
+  const DigitalProductBadge = styled.span`
+    display: inline-block;
+    background-color: #e3f2fd;
+    color: #0288d1;
+    font-size: 11px;
+    font-weight: bold;
+    padding: 3px 6px;
+    border-radius: 4px;
+    margin-top: 5px;
+  `;
+  
+  const DownloadButton = styled.button`
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    background-color: #e6fff0;
+    color: #00a362;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 8px;
+    margin-top: 5px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: background-color 0.2s;
+    
+    &:hover {
+      background-color: #d0ffe6;
     }
   `;
 

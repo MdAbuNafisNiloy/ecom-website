@@ -24,7 +24,9 @@ import {
   Snackbar,
   ThemeProvider,
   createTheme,
-  useMediaQuery
+  useMediaQuery,
+  Switch,
+  FormControlLabel
 } from '@mui/material';
 import {
   ChevronLeft,
@@ -42,7 +44,8 @@ import {
   CheckCircle,
   Home,
   ContentCopy,
-  Refresh
+  Refresh,
+  Info
 } from '@mui/icons-material';
 import pb from '../pocketbase';
 import { useCart } from '../contexts/CartContext';
@@ -112,6 +115,20 @@ const InstructionBox = styled(Box)(({ theme }) => ({
   border: `1px solid ${theme.palette.divider}`,
 }));
 
+const DigitalProductBadge = styled(Chip)(({ theme }) => ({
+  backgroundColor: theme.palette.primary.main,
+  color: theme.palette.primary.contrastText,
+  fontWeight: 500,
+  fontSize: '0.75rem',
+  height: 24,
+  marginLeft: theme.spacing(1)
+}));
+
+const NoticeBox = styled(Alert)(({ theme }) => ({
+  marginBottom: theme.spacing(3),
+  borderRadius: theme.spacing(1),
+}));
+
 const CartScreen = () => {
   // Create a theme with primary and secondary colors
   const theme = createTheme({
@@ -158,6 +175,10 @@ const CartScreen = () => {
   });
 
   const [cartItems, setCartItems] = useState([]);
+  const [digitalProducts, setDigitalProducts] = useState([]);
+  const [nonDigitalProducts, setNonDigitalProducts] = useState([]);
+  const [hasDigitalProducts, setHasDigitalProducts] = useState(false);
+  const [checkoutDigitalOnly, setCheckoutDigitalOnly] = useState(false);
   const [loading, setLoading] = useState(true);
   const [processingCheckout, setProcessingCheckout] = useState(false);
   const [user, setUser] = useState(null);
@@ -279,6 +300,13 @@ const CartScreen = () => {
         }
       }
       
+      // Separate digital and non-digital products
+      const digital = validCartItems.filter(item => item.digital_product);
+      const nonDigital = validCartItems.filter(item => !item.digital_product);
+      
+      setDigitalProducts(digital);
+      setNonDigitalProducts(nonDigital);
+      setHasDigitalProducts(digital.length > 0);
       setCartItems(validCartItems);
     } catch (error) {
       console.error('Error fetching user data:', error);
@@ -386,16 +414,24 @@ const CartScreen = () => {
     updateCartInDB(updatedCart);
   };
 
-  const getSubtotal = () => {
-    return cartItems.reduce((total, item) => total + (item.price * item.quantity), 0);
+  const getSubtotal = (items = null) => {
+    const productsToCalculate = items || (checkoutDigitalOnly ? digitalProducts : cartItems);
+    return productsToCalculate.reduce((total, item) => total + (item.price * item.quantity), 0);
   };
 
   // Get the total delivery charge - updated to only count the highest charge per seller
-  const getTotalDeliveryCharge = () => {
+  const getTotalDeliveryCharge = (items = null) => {
+    const productsToCalculate = items || (checkoutDigitalOnly ? digitalProducts : cartItems);
+    
+    // Digital products have no delivery charge
+    if (checkoutDigitalOnly && digitalProducts.length > 0) {
+      return 0;
+    }
+    
     // Group items by seller
     const sellerGroups = {};
     
-    cartItems.forEach(item => {
+    productsToCalculate.forEach(item => {
       if (!sellerGroups[item.seller]) {
         sellerGroups[item.seller] = [];
       }
@@ -414,8 +450,26 @@ const CartScreen = () => {
     return totalDeliveryCharge;
   };
 
-  const getTotalPrice = () => {
-    return getSubtotal() + getTotalDeliveryCharge();
+  const getTotalPrice = (items = null) => {
+    const productsToCalculate = items || (checkoutDigitalOnly ? digitalProducts : cartItems);
+    return getSubtotal(productsToCalculate) + getTotalDeliveryCharge(productsToCalculate);
+  };
+  
+  const getDigitalSubtotal = () => {
+    return digitalProducts.reduce((total, item) => total + (item.price * item.quantity), 0);
+  };
+  
+  const getNonDigitalSubtotal = () => {
+    return nonDigitalProducts.reduce((total, item) => total + (item.price * item.quantity), 0);
+  };
+  
+  const getDigitalTotalPrice = () => {
+    // Digital products have no delivery charge
+    return getDigitalSubtotal();
+  };
+  
+  const getNonDigitalTotalPrice = () => {
+    return getNonDigitalSubtotal() + getTotalDeliveryCharge(nonDigitalProducts);
   };
 
   const calculateCommission = (productPrice) => {
@@ -801,6 +855,45 @@ const CartScreen = () => {
     </Box>
   );
 
+  // Render digital and non-digital products separately
+  const renderCartItems = () => (
+    <>
+      {digitalProducts.length > 0 && (
+        <Box>
+          <Typography variant="h6">Digital Products</Typography>
+          {digitalProducts.map((item) => (
+            <StyledCard key={item.cartKey}>
+              {/* Render digital product details */}
+              <CardContent>
+                <Typography variant="subtitle1">{item.name}</Typography>
+                <Typography variant="body2">Price: ${item.price}</Typography>
+                <DigitalProductBadge label="Digital Product" />
+              </CardContent>
+            </StyledCard>
+          ))}
+        </Box>
+      )}
+
+      {nonDigitalProducts.length > 0 && (
+        <Box>
+          <Typography variant="h6">Non-Digital Products</Typography>
+          {nonDigitalProducts.map((item) => (
+            <StyledCard key={item.cartKey}>
+              {/* Render non-digital product details */}
+              <CardContent>
+                <Typography variant="subtitle1">{item.name}</Typography>
+                <Typography variant="body2">Price: ${item.price}</Typography>
+              </CardContent>
+            </StyledCard>
+          ))}
+        </Box>
+      )}
+    </>
+  );
+
+  // Disable Cash on Delivery if digital products are present
+  const isCashOnDeliveryDisabled = hasDigitalProducts;
+
   const renderCart = () => (
     <Box>
       <Typography variant="h5" gutterBottom sx={{ fontWeight: 600, mb: 3 }}>
@@ -1012,6 +1105,7 @@ const CartScreen = () => {
             <PaymentMethodButton 
               fullWidth
               selected={paymentMethod === 'Cash on Delivery'}
+              disabled={isCashOnDeliveryDisabled}
               onClick={() => setPaymentMethod('Cash on Delivery')}
               startIcon={<LocalAtm />}
             >

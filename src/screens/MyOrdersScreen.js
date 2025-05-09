@@ -23,7 +23,8 @@ import {
   XCircle, 
   HelpCircle,
   MapPin,
-  Star
+  Star,
+  Download
 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import pb from '../pocketbase';
@@ -217,6 +218,26 @@ const MyOrdersScreen = () => {
             <MapPin size={16} color="#007bff" />
             <TrackButtonText>Track Order</TrackButtonText>
           </TrackButton>
+          
+          {/* Digital products download section */}
+          {item.payment_status.toLowerCase() === 'paid' && item.products.some(product => product.digital_product) && (
+            <ActionButtonsDigital>
+              {item.products.filter(product => product.digital_product).map((product, idx) => (
+                <DownloadButton 
+                  key={idx}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    // Use download_link if available, otherwise use the product file URL
+                    const downloadUrl = product.download_link || pb.files.getURL(product, product.product);
+                    window.open(downloadUrl, '_blank');
+                  }}
+                >
+                  <Download size={16} color="#00a362" />
+                  <DownloadButtonText>Download {product.title}</DownloadButtonText>
+                </DownloadButton>
+              ))}
+            </ActionButtonsDigital>
+          )}
           
           {/* {item.order_status.toLowerCase() === 'delivered' && (
             <ReviewButton 
@@ -480,6 +501,38 @@ const ReviewButtonText = styled.span`
   color: #007bff;
   margin-left: 5px;
   font-weight: 500;
+`;
+
+const ActionButtonsDigital = styled.div`
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-left: auto;
+`;
+
+const DownloadButton = styled.button`
+  display: flex;
+  align-items: center;
+  background-color: #e6fff0;
+  padding: 8px 15px;
+  border-radius: 20px;
+  border: none;
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  &:hover {
+    background-color: #d0ffe6;
+  }
+`;
+
+const DownloadButtonText = styled.span`
+  color: #00a362;
+  margin-left: 5px;
+  font-weight: 500;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 120px;
 `;
 
 const EmptyContainer = styled.div`

@@ -518,7 +518,7 @@ const SignupScreen = () => {
               
               <SellerOptionsWrapper>
                 <SellerOptionLink 
-                  href='https://seller.friendsonlineshop.com/' 
+                  href='https://seller.goodmartbd.com/' 
                   target="_blank" 
                   rel="noopener noreferrer"
                 >
@@ -529,7 +529,7 @@ const SignupScreen = () => {
                 </SellerOptionLink>
                 
                 <SellerOptionLink 
-                  href='https://seller.friendsonlineshop.com/register' 
+                  href='https://seller.goodmartbd.com/register' 
                   target="_blank" 
                   rel="noopener noreferrer"
                 >
