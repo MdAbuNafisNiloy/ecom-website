@@ -137,7 +137,7 @@ const ProductsScreen = () => {
       setCategoriesLoading(true);
       const categoryRecords = await pb.collection('categories').getFullList({
         filter: 'featured=true',
-        sort: 'name',
+        sort: 'position',
         limit: 10,
       });
       setCategories(categoryRecords);
